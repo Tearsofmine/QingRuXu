@@ -1,0 +1,18 @@
+{
+  "name": "清如许 · 小说阅读",
+  "short_name": "清如许",
+  "description": "一款竹青护眼的中文小说阅读器原型。",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#edf5ed",
+  "theme_color": "#2f6a50",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
