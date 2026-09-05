@@ -131,28 +131,39 @@ h2 { font-size: 19px; margin-bottom: 14px; }
 .theme-choice[data-theme="night"] { background: #173127; }
 .theme-choice.selected { border-color: var(--green-800); box-shadow: 0 0 0 3px #d7ead9; }
 
-.reader { position: relative; height: 100dvh; min-height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); overflow: hidden; transition: background .25s, color .25s; }
+body.reader-active { overflow: hidden; }
+.reader { position: relative; height: 100dvh; min-height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); overflow: hidden; overscroll-behavior: none; transition: background .25s, color .25s; }
 .reader.theme-bamboo { background: #eaf4e9; color: #22382b; }
 .reader.theme-paper { background: #fbfaf2; color: #302e29; }
 .reader.theme-night { background: #172e24; color: #deeadf; }
 .reader-header { height: 54px; display: grid; grid-template-columns: 42px minmax(0, 1fr) minmax(42px, 88px); align-items: center; padding: 0 18px; color: inherit; }
 .reader-header button { color: inherit; background: transparent; box-shadow: none; }
 .reader-chapter-label { overflow: hidden; color: inherit; opacity: .55; font-size: 12px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.reader.menu-open .reader-chapter-label { opacity: 0; }
 .reader-device-status { display: flex; justify-content: flex-end; align-items: center; gap: 7px; min-width: 42px; color: inherit; font-variant-numeric: tabular-nums; font-size: 12px; font-weight: 650; opacity: .58; white-space: nowrap; }
 .reader-device-status time { letter-spacing: .02em; }
 .reader-battery { font-size: 11px; }
-.reader-page { position: relative; min-height: 0; overflow: hidden; padding: 22px var(--reader-side-padding, 29px) 10px; touch-action: pan-y; }
+.reader-page { position: relative; min-height: 0; overflow: hidden; overscroll-behavior: none; padding: 22px 29px 10px; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .reader-page.with-controls { padding-bottom: 184px; }
 .reader-page.with-settings { padding-bottom: 462px; }
 .reader-page h1 { font-family: "Songti SC", STSong, serif; font-size: 25px; line-height: 1.35; letter-spacing: .02em; margin-bottom: 25px; }
 .reader-text { white-space: pre-wrap; font-family: var(--reader-font-family, -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif); font-size: var(--reader-font-size, 19px); font-weight: var(--reader-font-weight, 650); line-height: var(--reader-line-height, 1.9); letter-spacing: .03em; }
-.tap-zone { position: absolute; top: 0; bottom: 0; z-index: 4; width: 30%; border: 0; background: transparent; }
+.tap-zone { position: absolute; top: 0; bottom: 0; z-index: 4; width: 30%; border: 0; background: transparent; touch-action: none; }
 .tap-zone.prev { left: 0; }
 .tap-zone.next { right: 0; }
 .reader-bottom { padding: 10px 24px 16px; }
 .reader-progress { height: 2px; border-radius: 2px; background: currentColor; opacity: .15; overflow: hidden; }
 .reader-progress span { display: block; height: 100%; background: currentColor; opacity: .9; }
 .reader-footer { display: flex; justify-content: space-between; opacity: .48; margin-top: 9px; font-size: 11px; }
+.reader-top-menu { position: absolute; z-index: 12; top: calc(env(safe-area-inset-top) + 7px); left: 50%; display: none; transform: translateX(-50%); pointer-events: none; }
+.reader-top-menu.open { display: block; }
+.reader-bookmark-action { display: flex; min-height: 40px; align-items: center; gap: 7px; border: 1px solid rgba(68,112,82,.12); border-radius: 999px; padding: 7px 13px; color: inherit; background: rgba(242,249,241,.9); box-shadow: 0 7px 18px rgba(30,69,44,.13); backdrop-filter: blur(14px); pointer-events: auto; white-space: nowrap; }
+.reader-bookmark-action span { color: var(--green-700); font-size: 16px; line-height: 1; }
+.reader-bookmark-action strong { font-size: 12px; }
+.reader-bookmark-action em { display: grid; min-width: 18px; height: 18px; place-items: center; border-radius: 9px; color: #fff; background: var(--green-700); font-size: 10px; font-style: normal; }
+.reader-bookmark-action.active span { color: #a97931; }
+.reader.theme-night .reader-bookmark-action { border-color: rgba(206,234,211,.1); background: rgba(36,62,48,.9); }
+.reader.theme-night .reader-bookmark-action span { color: #d4e8cc; }
 .reader-menu { position: absolute; z-index: 10; right: 20px; bottom: calc(env(safe-area-inset-bottom) + 52px); left: 20px; display: none; color: inherit; pointer-events: none; }
 .reader-menu.open { display: grid; gap: 0; }
 .reader-menu > * { pointer-events: auto; }
@@ -178,6 +189,21 @@ h2 { font-size: 19px; margin-bottom: 14px; }
 .reader-settings .swatch.paper { background: #fbfaf2; }
 .reader-settings .swatch.night { background: #173127; }
 .reader-settings .swatch.active { border-color: var(--green-800); box-shadow: 0 0 0 2px #cfe1d0; }
+
+.reader-page.page-turn-slide-next { animation: qrx-slide-next .27s cubic-bezier(.2,.72,.28,1); }
+.reader-page.page-turn-slide-previous { animation: qrx-slide-previous .27s cubic-bezier(.2,.72,.28,1); }
+.reader-page.page-turn-cover-next { animation: qrx-cover-next .3s cubic-bezier(.24,.74,.26,1); }
+.reader-page.page-turn-cover-previous { animation: qrx-cover-previous .3s cubic-bezier(.24,.74,.26,1); }
+.reader-page.page-turn-fade-next, .reader-page.page-turn-fade-previous { animation: qrx-fade .24s ease-out; }
+@keyframes qrx-slide-next { from { opacity: .62; transform: translateX(32px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes qrx-slide-previous { from { opacity: .62; transform: translateX(-32px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes qrx-cover-next { from { opacity: .72; clip-path: inset(0 0 0 100%); } to { opacity: 1; clip-path: inset(0); } }
+@keyframes qrx-cover-previous { from { opacity: .72; clip-path: inset(0 100% 0 0); } to { opacity: 1; clip-path: inset(0); } }
+@keyframes qrx-fade { from { opacity: .2; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-page[class*="page-turn-"] { animation: none; }
+}
 
 .sheet { position: fixed; z-index: 50; inset: 0; display: grid; justify-items: start; }
 .sheet[hidden] { display: none; }

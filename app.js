@@ -51,7 +51,7 @@ const sourceSamples = [
 let library = loadLibrary();
 let settings = loadSettings();
 let view = "shelf";
-let reader = { bookId: null, chapter: 0, page: 0, anchorOffset: null, menuOpen: false };
+let reader = { bookId: null, chapter: 0, page: 0, anchorOffset: null, menuOpen: false, transitionDirection: "" };
 let toastTimer;
 let libraryReady = false;
 let libraryReadyPromise = Promise.resolve();
@@ -78,11 +78,13 @@ function loadLibrary() {
 }
 
 function loadSettings() {
-  const defaults = { theme: "bamboo", fontSize: 19, fontFamily: "sans", fontWeight: "strong", lineHeight: "comfortable", pageWidth: "comfortable", shelfSort: "recent" };
+  const defaults = { theme: "bamboo", fontSize: 19, fontFamily: "sans", fontWeight: "strong", lineHeight: "comfortable", pageTurn: "slide", shelfSort: "recent" };
   try {
     const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY));
     const next = { ...defaults, ...(saved && typeof saved === "object" ? saved : {}) };
     if (!["recent", "imported", "title"].includes(next.shelfSort)) next.shelfSort = defaults.shelfSort;
+    if (!["slide", "cover", "fade"].includes(next.pageTurn)) next.pageTurn = defaults.pageTurn;
+    delete next.pageWidth;
     return next;
   }
   catch { return defaults; }
@@ -207,12 +209,15 @@ function lastBook() {
 }
 
 function render() {
+  const transitionDirection = reader.transitionDirection;
   let content;
   if (view === "reader") content = readerScreen();
   else if (view === "search") content = searchScreen();
   else if (view === "settings") content = settingsScreen();
   else content = shelfScreen();
   app.innerHTML = `${content}${importOverlay()}${shelfActionOverlay()}${backupOverlay()}`;
+  document.body.classList.toggle("reader-active", view === "reader");
+  if (transitionDirection && reader.transitionDirection === transitionDirection) reader.transitionDirection = "";
   bindEvents();
   syncReaderStatus();
 }
@@ -643,27 +648,26 @@ function readerScreen() {
   const fontFamily = settings.fontFamily === "song" ? "Songti SC, STSong, serif" : "-apple-system, BlinkMacSystemFont, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif";
   const fontWeight = settings.fontWeight === "regular" ? 520 : 650;
   const lineHeight = ({ compact: 1.72, comfortable: 1.9, relaxed: 2.08 })[settings.lineHeight] || 1.9;
-  const pagePadding = ({ narrow: 22, comfortable: 29, wide: 38 })[settings.pageWidth] || 29;
   const bookmarks = getBookBookmarks(book);
   const currentOffset = currentReaderOffset(book, pages);
   const isBookmarked = bookmarks.some((bookmark) => bookmarkMatchesCurrentPosition(book, bookmark, currentOffset));
   const bookmarkLabel = isBookmarked ? "取消书签" : "添加书签";
-  const bookmarkCount = bookmarks.length ? ` · ${bookmarks.length}` : "";
-  return `<section class="reader theme-${settings.theme}" style="--reader-font-size:${settings.fontSize}px;--reader-font-family:${fontFamily};--reader-font-weight:${fontWeight};--reader-line-height:${lineHeight};--reader-side-padding:${pagePadding}px">
+  const transitionClass = reader.transitionDirection ? `page-turn-${settings.pageTurn}-${reader.transitionDirection}` : "";
+  return `<section class="reader theme-${settings.theme} ${reader.menuOpen ? "menu-open" : ""}" style="--reader-font-size:${settings.fontSize}px;--reader-font-family:${fontFamily};--reader-font-weight:${fontWeight};--reader-line-height:${lineHeight}">
     <header class="reader-header"><button class="icon-button" data-reader-action="back" aria-label="返回书架">‹</button><span class="reader-chapter-label">${escapeHTML(chapter.title)}</span>${readerStatusMarkup()}</header>
+    <div class="reader-top-menu ${reader.menuOpen ? "open" : ""}"><button class="reader-bookmark-action ${isBookmarked ? "active" : ""}" data-reader-action="toggle-bookmark"><span aria-hidden="true">${isBookmarked ? "◆" : "◇"}</span><strong>${bookmarkLabel}</strong>${bookmarks.length ? `<em>${bookmarks.length}</em>` : ""}</button></div>
     <div class="reader-menu ${reader.menuOpen ? "open" : ""}" id="reader-menu">
       <div class="reader-settings ${reader.settingsOpen ? "open" : ""}">
         <div class="reader-settings-row"><span>字体</span><div class="reader-settings-control"><button class="${settings.fontFamily === "sans" ? "active" : ""}" data-reader-action="font-sans">黑体</button><button class="${settings.fontFamily === "song" ? "active" : ""}" data-reader-action="font-song">宋体</button></div></div>
         <div class="reader-settings-row"><span>字重</span><div class="reader-settings-control"><button class="${settings.fontWeight === "regular" ? "active" : ""}" data-reader-action="weight-regular">标准</button><button class="${settings.fontWeight !== "regular" ? "active" : ""}" data-reader-action="weight-strong">加粗</button></div></div>
         <div class="reader-settings-row"><span>字号</span><div class="reader-settings-control"><button data-reader-action="font-down">A−</button><span class="font-name">${settings.fontSize}px</span><button data-reader-action="font-up">A+</button></div></div>
         <div class="reader-settings-row"><span>行距</span><div class="reader-settings-control"><button class="${settings.lineHeight === "compact" ? "active" : ""}" data-reader-action="line-compact">紧凑</button><button class="${settings.lineHeight === "comfortable" ? "active" : ""}" data-reader-action="line-comfortable">舒适</button><button class="${settings.lineHeight === "relaxed" ? "active" : ""}" data-reader-action="line-relaxed">宽松</button></div></div>
-        <div class="reader-settings-row"><span>页边</span><div class="reader-settings-control"><button class="${settings.pageWidth === "narrow" ? "active" : ""}" data-reader-action="margin-narrow">窄</button><button class="${settings.pageWidth === "comfortable" ? "active" : ""}" data-reader-action="margin-comfortable">适中</button><button class="${settings.pageWidth === "wide" ? "active" : ""}" data-reader-action="margin-wide">宽</button></div></div>
+        <div class="reader-settings-row"><span>翻页</span><div class="reader-settings-control"><button class="${settings.pageTurn === "slide" ? "active" : ""}" data-reader-action="turn-slide">平滑</button><button class="${settings.pageTurn === "cover" ? "active" : ""}" data-reader-action="turn-cover">覆盖</button><button class="${settings.pageTurn === "fade" ? "active" : ""}" data-reader-action="turn-fade">淡入</button></div></div>
         <div class="reader-settings-row"><span>背景</span><div class="reader-settings-control"><button class="swatch bamboo ${settings.theme === "bamboo" ? "active" : ""}" data-reader-action="theme-bamboo" aria-label="竹青背景"></button><button class="swatch paper ${settings.theme === "paper" ? "active" : ""}" data-reader-action="theme-paper" aria-label="纸白背景"></button><button class="swatch night ${settings.theme === "night" ? "active" : ""}" data-reader-action="theme-night" aria-label="松烟夜背景"></button></div></div>
-        <div class="reader-settings-row"><span>书签${bookmarkCount}</span><button class="bookmark-toggle ${isBookmarked ? "active" : ""}" data-reader-action="toggle-bookmark">${bookmarkLabel}</button></div>
       </div>
       <div class="reader-toolbar"><button class="reader-tool chapter-tool" data-reader-action="previous-chapter"><span class="tool-icon">‹</span><span>上一章</span></button><button class="reader-tool" data-reader-action="chapters"><span class="tool-icon">☷</span><span>目录</span></button><button class="reader-tool" data-reader-action="toggle-theme"><span class="tool-icon">${settings.theme === "night" ? "☀" : "☾"}</span><span>${settings.theme === "night" ? "白天" : "夜间"}</span></button><button class="reader-tool" data-reader-action="settings"><span class="tool-icon settings-icon">⚙</span><span>设置</span></button><button class="reader-tool chapter-tool" data-reader-action="next-chapter"><span class="tool-icon">›</span><span>下一章</span></button></div>
     </div>
-    <article class="reader-page ${reader.menuOpen ? "with-controls" : ""} ${reader.settingsOpen ? "with-settings" : ""}" id="reader-page"><button class="tap-zone prev" aria-label="上一页"></button><button class="tap-zone next" aria-label="下一页"></button><h1>${escapeHTML(chapter.title)}</h1><div class="reader-text">${escapeHTML(pages[reader.page])}</div></article>
+    <article class="reader-page ${reader.menuOpen ? "with-controls" : ""} ${reader.settingsOpen ? "with-settings" : ""} ${transitionClass}" id="reader-page"><button class="tap-zone prev" aria-label="上一页"></button><button class="tap-zone next" aria-label="下一页"></button><h1>${escapeHTML(chapter.title)}</h1><div class="reader-text">${escapeHTML(pages[reader.page])}</div></article>
     <footer class="reader-bottom"><div class="reader-progress"><span style="width:${progress}%"></span></div><div class="reader-footer"><span>${reader.page + 1} / ${pages.length}</span><span>${progress}%</span></div></footer>
   </section>${chapterSheet(book)}`;
 }
@@ -737,7 +741,7 @@ function getBookBookmarks(book) {
 }
 
 function bookmarkPanel(book, bookmarks) {
-  if (!bookmarks.length) return `<div class="bookmark-empty"><span>⌑</span><strong>还没有书签</strong><p>阅读时点开设置，可把当前页加入书签。</p></div>`;
+  if (!bookmarks.length) return `<div class="bookmark-empty"><span>⌑</span><strong>还没有书签</strong><p>阅读时点一下页面，再用顶部按钮收藏当前页。</p></div>`;
   return `<div class="bookmark-list">${bookmarks.map((bookmark) => {
     const title = book.chapters[bookmark.chapter]?.title || bookmark.chapterTitle || "章节已变更";
     const location = resolveReadingPage(book, bookmark);
@@ -748,9 +752,8 @@ function bookmarkPanel(book, bookmarks) {
 function paginate(text, fontSize) {
   const baseCapacity = fontSize >= 23 ? 155 : fontSize <= 17 ? 250 : 200;
   const lineFactor = ({ compact: 1.1, comfortable: 1, relaxed: 0.87 })[settings.lineHeight] || 1;
-  const widthFactor = ({ narrow: 1.1, comfortable: 1, wide: 0.87 })[settings.pageWidth] || 1;
   const weightFactor = settings.fontWeight === "regular" ? 1 : 0.97;
-  const perPage = Math.max(80, Math.round(baseCapacity * lineFactor * widthFactor * weightFactor));
+  const perPage = Math.max(80, Math.round(baseCapacity * lineFactor * weightFactor));
   const paragraphs = text.split(/\n\s*\n/);
   const pages = [];
   let current = "";
@@ -1180,7 +1183,7 @@ function openBook(id) {
   const pages = paginate(chapter.text, settings.fontSize);
   const savedOffset = book.readingPosition?.charOffset;
   const anchorOffset = Number.isFinite(savedOffset) ? clamp(savedOffset, 0, chapter.text.length) : pageStartOffset(chapter.text, pages, location.page);
-  reader = { bookId: id, chapter: location.chapter, page: location.page, anchorOffset, menuOpen: false, sheetOpen: false, sheetTab: "chapters", chapterOrder: "asc", chapterQuery: "", settingsOpen: false };
+  reader = { bookId: id, chapter: location.chapter, page: location.page, anchorOffset, menuOpen: false, sheetOpen: false, sheetTab: "chapters", chapterOrder: "asc", chapterQuery: "", settingsOpen: false, transitionDirection: "" };
   view = "reader";
   render();
 }
@@ -1200,7 +1203,7 @@ function readerAction(action) {
   if (action === "font-up") { adjustFontSize(1); return; }
   if (action === "font-down") { adjustFontSize(-1); return; }
   if (action === "line-compact" || action === "line-comfortable" || action === "line-relaxed") { applyReaderLayout({ lineHeight: action.replace("line-", "") }); return; }
-  if (action === "margin-narrow" || action === "margin-comfortable" || action === "margin-wide") { applyReaderLayout({ pageWidth: action.replace("margin-", "") }); return; }
+  if (action === "turn-slide" || action === "turn-cover" || action === "turn-fade") { settings.pageTurn = action.replace("turn-", ""); persist(); render(); return; }
   if (action === "toggle-bookmark") { toggleBookmark(); return; }
   if (action === "previous-chapter") { previousChapter(); return; }
   if (action === "next-chapter") { nextChapter(); return; }
@@ -1213,7 +1216,8 @@ function nextPage() {
   const pages = paginate(book.chapters[reader.chapter].text, settings.fontSize);
   if (reader.page < pages.length - 1) reader.page += 1;
   else if (reader.chapter < book.chapters.length - 1) { reader.chapter += 1; reader.page = 0; }
-  else { showToast("已经读到本书结尾"); }
+  else { showToast("已经读到本书结尾"); return; }
+  reader.transitionDirection = "next";
   setReaderAnchorFromPage(book);
   reader.menuOpen = false; reader.settingsOpen = false; updateProgress(); render();
 }
@@ -1223,6 +1227,7 @@ function previousPage() {
   if (reader.page > 0) reader.page -= 1;
   else if (reader.chapter > 0) { reader.chapter -= 1; reader.page = paginate(book.chapters[reader.chapter].text, settings.fontSize).length - 1; }
   else { reader.menuOpen = false; render(); return; }
+  reader.transitionDirection = "previous";
   setReaderAnchorFromPage(book);
   reader.menuOpen = false; reader.settingsOpen = false; updateProgress(); render();
 }
@@ -1232,6 +1237,7 @@ function previousChapter() {
   const book = currentBook();
   reader.chapter -= 1;
   reader.page = paginate(book.chapters[reader.chapter].text, settings.fontSize).length - 1;
+  reader.transitionDirection = "previous";
   setReaderAnchorFromPage(book);
   updateProgress();
   render();
@@ -1242,6 +1248,7 @@ function nextChapter() {
   if (reader.chapter >= book.chapters.length - 1) { showToast("已经是最后一章"); return; }
   reader.chapter += 1;
   reader.page = 0;
+  reader.transitionDirection = "next";
   setReaderAnchorFromPage(book);
   updateProgress();
   render();
@@ -1385,19 +1392,23 @@ function bindSwipe(element) {
     trackingPointer = true;
     startX = event.clientX;
     startY = event.clientY;
+    try { element.setPointerCapture(event.pointerId); } catch {}
   });
+  element.addEventListener("touchmove", (event) => event.preventDefault(), { passive: false });
+  element.addEventListener("dblclick", (event) => event.preventDefault());
   element.addEventListener("pointercancel", () => { trackingPointer = false; });
   element.addEventListener("pointerup", (event) => {
     if (event.isPrimary === false) return;
     if (!trackingPointer) return;
     trackingPointer = false;
-    const diff = event.clientX - startX;
-    if (Math.abs(diff) >= 42) {
+    const diffX = event.clientX - startX;
+    const diffY = event.clientY - startY;
+    if (Math.abs(diffX) >= 42 && Math.abs(diffX) > Math.abs(diffY) * 1.2) {
       event.preventDefault();
-      if (diff < 0) nextPage(); else previousPage();
+      if (diffX < 0) nextPage(); else previousPage();
       return;
     }
-    if (Math.abs(event.clientY - startY) > 24) return;
+    if (Math.abs(diffY) > 18 || Math.abs(diffX) > 18) return;
     const bounds = element.getBoundingClientRect();
     const relativeX = event.clientX - bounds.left;
     if (relativeX <= bounds.width * .3) { previousPage(); return; }
@@ -1465,7 +1476,7 @@ function sanitizeBackupSettings(value) {
     fontFamily: choose(["sans", "song"], source.fontFamily, settings.fontFamily),
     fontWeight: choose(["regular", "strong"], source.fontWeight, settings.fontWeight),
     lineHeight: choose(["compact", "comfortable", "relaxed"], source.lineHeight, settings.lineHeight),
-    pageWidth: choose(["narrow", "comfortable", "wide"], source.pageWidth, settings.pageWidth),
+    pageTurn: choose(["slide", "cover", "fade"], source.pageTurn, settings.pageTurn),
     shelfSort: choose(["recent", "imported", "title"], source.shelfSort, settings.shelfSort)
   };
 }
