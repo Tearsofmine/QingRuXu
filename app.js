@@ -65,6 +65,7 @@ let readerBatteryLevel = null;
 let readerBatteryCharging = false;
 let shelfQuery = "";
 let backupSession = emptyBackupSession();
+const paginationCache = [];
 
 const app = document.querySelector("#app");
 const picker = document.querySelector("#file-picker");
@@ -82,6 +83,7 @@ function loadSettings() {
   try {
     const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY));
     const next = { ...defaults, ...(saved && typeof saved === "object" ? saved : {}) };
+    next.fontSize = clamp(Number(next.fontSize) || defaults.fontSize, 16, 40);
     if (!["recent", "imported", "title"].includes(next.shelfSort)) next.shelfSort = defaults.shelfSort;
     if (!["slide", "cover", "fade"].includes(next.pageTurn)) next.pageTurn = defaults.pageTurn;
     delete next.pageWidth;
@@ -667,7 +669,7 @@ function readerScreen() {
       </div>
       <div class="reader-toolbar"><button class="reader-tool chapter-tool" data-reader-action="previous-chapter"><span class="tool-icon">‹</span><span>上一章</span></button><button class="reader-tool" data-reader-action="chapters"><span class="tool-icon">☷</span><span>目录</span></button><button class="reader-tool" data-reader-action="toggle-theme"><span class="tool-icon">${settings.theme === "night" ? "☀" : "☾"}</span><span>${settings.theme === "night" ? "白天" : "夜间"}</span></button><button class="reader-tool" data-reader-action="settings"><span class="tool-icon settings-icon">⚙</span><span>设置</span></button><button class="reader-tool chapter-tool" data-reader-action="next-chapter"><span class="tool-icon">›</span><span>下一章</span></button></div>
     </div>
-    <article class="reader-page ${reader.menuOpen ? "with-controls" : ""} ${reader.settingsOpen ? "with-settings" : ""} ${transitionClass}" id="reader-page"><button class="tap-zone prev" aria-label="上一页"></button><button class="tap-zone next" aria-label="下一页"></button><h1>${escapeHTML(chapter.title)}</h1><div class="reader-text">${escapeHTML(pages[reader.page])}</div></article>
+    <article class="reader-page ${reader.menuOpen ? "with-controls" : ""} ${reader.settingsOpen ? "with-settings" : ""} ${transitionClass}" id="reader-page"><button class="tap-zone prev" aria-label="上一页"></button><button class="tap-zone next" aria-label="下一页"></button>${reader.page === 0 ? `<h1>${escapeHTML(chapter.title)}</h1>` : ""}<div class="reader-text">${escapeHTML(pages[reader.page])}</div></article>
     <footer class="reader-bottom"><div class="reader-progress"><span style="width:${progress}%"></span></div><div class="reader-footer"><span>${reader.page + 1} / ${pages.length}</span><span>${progress}%</span></div></footer>
   </section>${chapterSheet(book)}`;
 }
@@ -732,7 +734,7 @@ function chapterSheet(book) {
   const descending = reader.chapterOrder === "desc";
   const chapterEntries = book.chapters.map((chapter, index) => ({ chapter, index }));
   if (descending) chapterEntries.reverse();
-  const content = showingBookmarks ? bookmarkPanel(book, bookmarks) : `<div class="chapter-search"><span aria-hidden="true">⌕</span><input id="chapter-search" value="${escapeHTML(query)}" placeholder="搜索章节" autocomplete="off" /></div><div class="chapter-directory-meta"><span>共 ${book.chapters.length} 章 · 当前第 ${reader.chapter + 1} 章</span><button data-reader-action="toggle-chapter-order" aria-label="切换目录顺序">${descending ? "倒序 ↓" : "正序 ↑"}</button></div><p class="chapter-search-empty" id="chapter-search-empty" hidden>没有匹配的章节</p><div class="chapter-list" id="chapter-list">${chapterEntries.map(({ chapter, index }) => `<button class="${index === reader.chapter ? "active" : ""}" data-chapter="${index}"><span>${escapeHTML(chapter.title)}</span>${index === reader.chapter ? `<em>正在读</em>` : ""}</button>`).join("")}</div>`;
+  const content = showingBookmarks ? bookmarkPanel(book, bookmarks) : `<div class="chapter-search"><span aria-hidden="true">⌕</span><input id="chapter-search" value="${escapeHTML(query)}" placeholder="搜索章节" autocomplete="off" enterkeyhint="search" /></div><div class="chapter-directory-meta"><span id="chapter-result-meta">共 ${book.chapters.length} 章 · 当前第 ${reader.chapter + 1} 章</span><button data-reader-action="toggle-chapter-order" aria-label="切换目录顺序">${descending ? "倒序 ↓" : "正序 ↑"}</button></div><p class="chapter-search-empty" id="chapter-search-empty" hidden>没有匹配的章节</p><div class="chapter-list" id="chapter-list">${chapterEntries.map(({ chapter, index }) => `<button class="${index === reader.chapter ? "active" : ""}" data-chapter="${index}"><span>${escapeHTML(chapter.title)}</span>${index === reader.chapter ? `<em>正在读</em>` : ""}</button>`).join("")}</div>`;
   return `<aside class="sheet" id="chapter-sheet" ${reader.sheetOpen ? "" : "hidden"}><button class="sheet-backdrop" data-reader-action="close-chapters" aria-label="关闭目录并返回阅读"></button><div class="sheet-content"><div class="sheet-handle"></div><div class="sheet-head"><div><h2>${escapeHTML(book.title)}</h2><p class="subtle">目录与书签</p></div><button class="close" data-reader-action="close-chapters" aria-label="关闭目录">×</button></div><div class="chapter-tabs"><button class="${showingBookmarks ? "" : "active"}" data-reader-action="show-chapters">目录</button><button class="${showingBookmarks ? "active" : ""}" data-reader-action="show-bookmarks">书签${bookmarks.length ? ` (${bookmarks.length})` : ""}</button></div>${content}</div></aside>`;
 }
 
@@ -750,23 +752,94 @@ function bookmarkPanel(book, bookmarks) {
 }
 
 function paginate(text, fontSize) {
-  const baseCapacity = fontSize >= 23 ? 155 : fontSize <= 17 ? 250 : 200;
-  const lineFactor = ({ compact: 1.1, comfortable: 1, relaxed: 0.87 })[settings.lineHeight] || 1;
-  const weightFactor = settings.fontWeight === "regular" ? 1 : 0.97;
-  const perPage = Math.max(80, Math.round(baseCapacity * lineFactor * weightFactor));
-  const paragraphs = text.split(/\n\s*\n/);
+  const source = String(text || "");
+  if (!source.trim()) return ["暂无正文。"]; 
+  const normalizedFontSize = clamp(Number(fontSize) || 19, 16, 40);
+  const signature = [normalizedFontSize, settings.fontFamily, settings.fontWeight, settings.lineHeight, window.innerWidth, window.innerHeight].join("|");
+  const cachedIndex = paginationCache.findIndex((entry) => entry.text === source && entry.signature === signature);
+  if (cachedIndex >= 0) {
+    const [cached] = paginationCache.splice(cachedIndex, 1);
+    paginationCache.unshift(cached);
+    return cached.pages;
+  }
+  const pages = paginateByVisibleHeight(source, normalizedFontSize);
+  paginationCache.unshift({ text: source, signature, pages });
+  if (paginationCache.length > 24) paginationCache.pop();
+  return pages;
+}
+
+function paginateByVisibleHeight(source, fontSize) {
+  const fontFamily = settings.fontFamily === "song" ? "Songti SC, STSong, serif" : "-apple-system, BlinkMacSystemFont, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif";
+  const fontWeight = settings.fontWeight === "regular" ? 520 : 650;
+  const lineHeight = ({ compact: 1.72, comfortable: 1.9, relaxed: 2.08 })[settings.lineHeight] || 1.9;
+  const probe = document.createElement("section");
+  probe.className = "reader pagination-probe";
+  probe.style.cssText = `--reader-font-size:${fontSize}px;--reader-font-family:${fontFamily};--reader-font-weight:${fontWeight};--reader-line-height:${lineHeight}`;
+  probe.innerHTML = `<header class="reader-header"></header><article class="reader-page"><h1>章节标题</h1><div class="reader-text"></div></article><footer class="reader-bottom"><div class="reader-progress"><span></span></div><div class="reader-footer"><span>1 / 1</span><span>0%</span></div></footer>`;
+  document.body.appendChild(probe);
+  const pageBox = probe.querySelector(".reader-page");
+  const heading = probe.querySelector("h1");
+  const textBox = probe.querySelector(".reader-text");
+  if (!pageBox || !heading || !textBox || pageBox.clientHeight < 120) {
+    probe.remove();
+    return paginateByEstimate(source, fontSize);
+  }
+  const fits = (value, firstPage) => {
+    heading.style.display = firstPage ? "" : "none";
+    textBox.textContent = value;
+    return pageBox.scrollHeight <= pageBox.clientHeight + 1;
+  };
   const pages = [];
-  let current = "";
-  paragraphs.forEach((paragraph) => {
-    let remaining = `${paragraph}\n\n`;
-    if (current.length && current.length + remaining.length > perPage) { pages.push(current.trim()); current = ""; }
-    while (remaining.length > perPage && !current) {
-      pages.push(remaining.slice(0, perPage));
-      remaining = remaining.slice(perPage);
+  let cursor = 0;
+  while (cursor < source.length) {
+    while (cursor < source.length && /\s/.test(source[cursor])) cursor += 1;
+    if (cursor >= source.length) break;
+    let low = cursor + 1;
+    let high = source.length;
+    let best = cursor;
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      if (fits(source.slice(cursor, middle).trimEnd(), pages.length === 0)) {
+        best = middle;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
     }
-    current += remaining;
-  });
-  if (current.trim()) pages.push(current.trim());
+    if (best <= cursor) best = cursor + 1;
+    const end = naturalPageBreak(source, cursor, best);
+    const content = source.slice(cursor, end).trim();
+    if (content) pages.push(content);
+    cursor = Math.max(end, cursor + 1);
+  }
+  probe.remove();
+  return pages.length ? pages : ["暂无正文。"]; 
+}
+
+function naturalPageBreak(text, start, fittedEnd) {
+  if (fittedEnd >= text.length) return text.length;
+  const minimum = start + Math.floor((fittedEnd - start) * .76);
+  for (let index = fittedEnd; index > minimum; index -= 1) {
+    const character = text[index - 1];
+    if (character === "\n" || /[。！？；…]/.test(character)) return index;
+  }
+  return fittedEnd;
+}
+
+function paginateByEstimate(source, fontSize) {
+  const baseCapacity = Math.round(180 * Math.pow(19 / fontSize, 1.7));
+  const lineFactor = ({ compact: 1.08, comfortable: .92, relaxed: .78 })[settings.lineHeight] || .92;
+  const perPage = Math.max(30, Math.round(baseCapacity * lineFactor));
+  const pages = [];
+  let cursor = 0;
+  while (cursor < source.length) {
+    const firstPageAllowance = pages.length === 0 ? .76 : 1;
+    const fittedEnd = Math.min(source.length, cursor + Math.max(24, Math.floor(perPage * firstPageAllowance)));
+    const end = naturalPageBreak(source, cursor, fittedEnd);
+    const content = source.slice(cursor, end).trim();
+    if (content) pages.push(content);
+    cursor = Math.max(end, cursor + 1);
+  }
   return pages.length ? pages : ["暂无正文。"]; 
 }
 
@@ -900,13 +973,18 @@ function bindEvents() {
   document.querySelectorAll("[data-remove-bookmark]").forEach((el) => el.addEventListener("click", () => removeBookmark(el.dataset.removeBookmark)));
   const chapterSearch = document.querySelector("#chapter-search");
   if (chapterSearch) {
-    chapterSearch.addEventListener("input", () => {
+    const applyChapterSearch = () => {
       reader.chapterQuery = chapterSearch.value;
       filterChapterList(reader.chapterQuery);
-    });
+    };
+    chapterSearch.addEventListener("input", applyChapterSearch);
+    chapterSearch.addEventListener("search", applyChapterSearch);
+    chapterSearch.addEventListener("compositionend", applyChapterSearch);
     filterChapterList(reader.chapterQuery || "");
-    requestAnimationFrame(() => document.querySelector(".chapter-list button.active")?.scrollIntoView({ block: "center" }));
+    if (!(reader.chapterQuery || "").trim()) requestAnimationFrame(() => document.querySelector(".chapter-list button.active:not([hidden])")?.scrollIntoView({ block: "center" }));
   }
+  const chapterBackdrop = document.querySelector("#chapter-sheet .sheet-backdrop");
+  if (chapterBackdrop) chapterBackdrop.addEventListener("touchmove", (event) => event.preventDefault(), { passive: false });
   const readerPage = document.querySelector("#reader-page");
   if (readerPage) bindSwipe(readerPage);
 }
@@ -1278,6 +1356,8 @@ function filterChapterList(query) {
   });
   const empty = document.querySelector("#chapter-search-empty");
   if (empty) empty.hidden = visible > 0;
+  const meta = document.querySelector("#chapter-result-meta");
+  if (meta) meta.textContent = normalized ? `找到 ${visible} 章` : `共 ${buttons.length} 章 · 当前第 ${reader.chapter + 1} 章`;
 }
 
 function toggleBookmark() {
@@ -1359,7 +1439,7 @@ function applyReaderLayout(nextSettings) {
 }
 
 function adjustFontSize(delta) {
-  const nextSize = clamp(settings.fontSize + delta, 16, 26);
+  const nextSize = clamp(settings.fontSize + delta, 16, 40);
   if (nextSize === settings.fontSize) return;
   applyReaderLayout({ fontSize: nextSize });
 }
@@ -1472,7 +1552,7 @@ function sanitizeBackupSettings(value) {
   const choose = (allowed, candidate, fallback) => allowed.includes(candidate) ? candidate : fallback;
   return {
     theme: choose(["bamboo", "paper", "night"], source.theme, settings.theme),
-    fontSize: clamp(Number(source.fontSize) || settings.fontSize, 16, 26),
+    fontSize: clamp(Number(source.fontSize) || settings.fontSize, 16, 40),
     fontFamily: choose(["sans", "song"], source.fontFamily, settings.fontFamily),
     fontWeight: choose(["regular", "strong"], source.fontWeight, settings.fontWeight),
     lineHeight: choose(["compact", "comfortable", "relaxed"], source.lineHeight, settings.lineHeight),

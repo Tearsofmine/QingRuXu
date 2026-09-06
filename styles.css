@@ -131,8 +131,9 @@ h2 { font-size: 19px; margin-bottom: 14px; }
 .theme-choice[data-theme="night"] { background: #173127; }
 .theme-choice.selected { border-color: var(--green-800); box-shadow: 0 0 0 3px #d7ead9; }
 
-body.reader-active { overflow: hidden; }
+body.reader-active { position: fixed; inset: 0; width: 100%; height: 100%; overflow: hidden; }
 .reader { position: relative; height: 100dvh; min-height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); overflow: hidden; overscroll-behavior: none; transition: background .25s, color .25s; }
+.reader.pagination-probe { position: fixed; z-index: -1; top: 0; left: 50%; width: min(560px, 100vw); margin: 0; transform: translateX(-50%); visibility: hidden; pointer-events: none; }
 .reader.theme-bamboo { background: #eaf4e9; color: #22382b; }
 .reader.theme-paper { background: #fbfaf2; color: #302e29; }
 .reader.theme-night { background: #172e24; color: #deeadf; }
@@ -205,10 +206,10 @@ body.reader-active { overflow: hidden; }
   .reader-page[class*="page-turn-"] { animation: none; }
 }
 
-.sheet { position: fixed; z-index: 50; inset: 0; display: grid; justify-items: start; }
+.sheet { position: fixed; z-index: 50; inset: 0; display: grid; justify-items: start; overflow: hidden; overscroll-behavior: none; }
 .sheet[hidden] { display: none; }
-.sheet-backdrop { position: absolute; z-index: 0; inset: 0; width: 100%; height: 100%; border: 0; padding: 0; background: rgba(12,31,20,.26); }
-.sheet-content { position: relative; z-index: 1; width: min(82vw, 320px); height: 100dvh; margin: 0; padding: calc(env(safe-area-inset-top) + 18px) 20px calc(env(safe-area-inset-bottom) + 22px); border-radius: 0 26px 26px 0; background: var(--paper); box-shadow: 15px 0 35px rgba(0,0,0,.14); }
+.sheet-backdrop { position: absolute; z-index: 0; inset: 0; width: 100%; height: 100%; border: 0; padding: 0; background: rgba(12,31,20,.26); touch-action: none; overscroll-behavior: none; }
+.sheet-content { position: relative; z-index: 1; width: min(82vw, 320px); height: 100dvh; margin: 0; overflow: hidden; overscroll-behavior: none; padding: calc(env(safe-area-inset-top) + 18px) 20px calc(env(safe-area-inset-bottom) + 22px); border-radius: 0 26px 26px 0; background: var(--paper); box-shadow: 15px 0 35px rgba(0,0,0,.14); }
 .sheet-handle { width: 4px; height: 36px; border-radius: 8px; background: #c5d4c7; position: absolute; left: min(82vw, 320px); top: 50%; transform: translate(-10px, -50%); }
 .sheet-head { display: flex; justify-content: space-between; align-items: center; }
 .sheet-head h2 { margin: 0 0 3px; }
@@ -221,12 +222,13 @@ body.reader-active { overflow: hidden; }
 .chapter-directory-meta { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 10px 0 1px; color: var(--muted); font-size: 11px; font-weight: 650; }
 .chapter-directory-meta button { min-height: 30px; border: 0; border-radius: 999px; padding: 5px 10px; color: var(--green-800); background: #e8f1e8; font-size: 11px; font-weight: 750; }
 .chapter-search-empty { margin: 19px 0 0; color: var(--muted); font-size: 13px; text-align: center; }
-.chapter-list { margin-top: 3px; max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 232px); overflow: auto; }
+.chapter-list { margin-top: 3px; max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 232px); overflow: auto; overscroll-behavior: contain; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
 .chapter-list button { display: flex; justify-content: space-between; align-items: center; gap: 9px; width: 100%; border: 0; background: transparent; text-align: left; color: var(--ink); border-bottom: 1px solid var(--line); padding: 14px 0; font-size: 14px; }
+.chapter-list button[hidden] { display: none; }
 .chapter-list button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chapter-list button em { flex: 0 0 auto; border-radius: 999px; padding: 3px 7px; color: #fff; background: var(--green-700); font-size: 10px; font-style: normal; font-weight: 700; }
 .chapter-list button.active { color: var(--green-800); font-weight: 750; }
-.bookmark-list { max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 174px); overflow: auto; }
+.bookmark-list { max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 174px); overflow: auto; overscroll-behavior: contain; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
 .bookmark-item { display: grid; grid-template-columns: minmax(0, 1fr) 32px; gap: 8px; align-items: center; border-bottom: 1px solid var(--line); }
 .bookmark-item > button:first-child { display: grid; gap: 4px; width: 100%; padding: 13px 0; border: 0; text-align: left; color: var(--ink); background: transparent; }
 .bookmark-item strong { overflow: hidden; font-size: 14px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }

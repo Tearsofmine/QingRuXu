@@ -1,5 +1,5 @@
-const CACHE = "qingruxu-v29";
-const FILES = ["./", "./index.html", "./styles.css?v=29", "./app.js?v=29", "./manifest.webmanifest?v=29", "./assets/icon.svg"];
+const CACHE = "qingruxu-v31";
+const FILES = ["./", "./index.html", "./styles.css?v=31", "./app.js?v=31", "./manifest.webmanifest?v=31", "./assets/icon.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(FILES)));
