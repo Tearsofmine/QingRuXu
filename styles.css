@@ -131,31 +131,32 @@ h2 { font-size: 19px; margin-bottom: 14px; }
 .theme-choice[data-theme="night"] { background: #173127; }
 .theme-choice.selected { border-color: var(--green-800); box-shadow: 0 0 0 3px #d7ead9; }
 
-body.reader-active { position: fixed; inset: 0; width: 100%; height: 100%; overflow: hidden; }
-.reader { position: relative; height: 100dvh; min-height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); overflow: hidden; overscroll-behavior: none; transition: background .25s, color .25s; }
+body.reader-active { position: fixed; inset: 0; width: 100%; height: 100dvh; overflow: hidden; }
+body.reader-active .app-shell { height: 100dvh; min-height: 0; }
+.reader { position: relative; height: 100dvh; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; padding: env(safe-area-inset-top) 0 0; overflow: hidden; overscroll-behavior: none; transition: background .25s, color .25s; }
 .reader.pagination-probe { position: fixed; z-index: -1; top: 0; left: 50%; width: min(560px, 100vw); margin: 0; transform: translateX(-50%); visibility: hidden; pointer-events: none; }
 .reader.theme-bamboo { background: #eaf4e9; color: #22382b; }
 .reader.theme-paper { background: #fbfaf2; color: #302e29; }
 .reader.theme-night { background: #172e24; color: #deeadf; }
-.reader-header { height: 54px; display: grid; grid-template-columns: 42px minmax(0, 1fr) minmax(42px, 88px); align-items: center; padding: 0 18px; color: inherit; }
+.reader-header { height: 50px; display: grid; grid-template-columns: 42px minmax(0, 1fr) minmax(42px, 88px); align-items: center; padding: 0 18px; color: inherit; }
 .reader-header button { color: inherit; background: transparent; box-shadow: none; }
 .reader-chapter-label { overflow: hidden; color: inherit; opacity: .55; font-size: 12px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 .reader.menu-open .reader-chapter-label { opacity: 0; }
 .reader-device-status { display: flex; justify-content: flex-end; align-items: center; gap: 7px; min-width: 42px; color: inherit; font-variant-numeric: tabular-nums; font-size: 12px; font-weight: 650; opacity: .58; white-space: nowrap; }
 .reader-device-status time { letter-spacing: .02em; }
 .reader-battery { font-size: 11px; }
-.reader-page { position: relative; min-height: 0; overflow: hidden; overscroll-behavior: none; padding: 22px 29px 10px; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.reader-page { position: relative; min-height: 0; overflow: hidden; overscroll-behavior: none; padding: 16px clamp(22px, 6vw, 29px) 4px; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .reader-page.with-controls { padding-bottom: 184px; }
 .reader-page.with-settings { padding-bottom: 462px; }
-.reader-page h1 { font-family: "Songti SC", STSong, serif; font-size: 25px; line-height: 1.35; letter-spacing: .02em; margin-bottom: 25px; }
+.reader-page h1 { font-family: "Songti SC", STSong, serif; font-size: 25px; line-height: 1.35; letter-spacing: .02em; margin-bottom: 20px; }
 .reader-text { white-space: pre-wrap; font-family: var(--reader-font-family, -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif); font-size: var(--reader-font-size, 19px); font-weight: var(--reader-font-weight, 650); line-height: var(--reader-line-height, 1.9); letter-spacing: .03em; }
 .tap-zone { position: absolute; top: 0; bottom: 0; z-index: 4; width: 30%; border: 0; background: transparent; touch-action: none; }
 .tap-zone.prev { left: 0; }
 .tap-zone.next { right: 0; }
-.reader-bottom { padding: 10px 24px 16px; }
+.reader-bottom { padding: 6px 24px max(12px, env(safe-area-inset-bottom)); }
 .reader-progress { height: 2px; border-radius: 2px; background: currentColor; opacity: .15; overflow: hidden; }
 .reader-progress span { display: block; height: 100%; background: currentColor; opacity: .9; }
-.reader-footer { display: flex; justify-content: space-between; opacity: .48; margin-top: 9px; font-size: 11px; }
+.reader-footer { display: flex; justify-content: space-between; opacity: .48; margin-top: 6px; font-size: 11px; }
 .reader-top-menu { position: absolute; z-index: 12; top: calc(env(safe-area-inset-top) + 7px); left: 50%; display: none; transform: translateX(-50%); pointer-events: none; }
 .reader-top-menu.open { display: block; }
 .reader-bookmark-action { display: flex; min-height: 40px; align-items: center; gap: 7px; border: 1px solid rgba(68,112,82,.12); border-radius: 999px; padding: 7px 13px; color: inherit; background: rgba(242,249,241,.9); box-shadow: 0 7px 18px rgba(30,69,44,.13); backdrop-filter: blur(14px); pointer-events: auto; white-space: nowrap; }
