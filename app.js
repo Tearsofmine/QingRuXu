@@ -66,6 +66,7 @@ let readerBatteryCharging = false;
 let shelfQuery = "";
 let backupSession = emptyBackupSession();
 const paginationCache = [];
+let readerViewportHeight = window.innerHeight;
 
 const app = document.querySelector("#app");
 const picker = document.querySelector("#file-picker");
@@ -211,6 +212,7 @@ function lastBook() {
 }
 
 function render() {
+  syncReaderViewportHeight();
   const transitionDirection = reader.transitionDirection;
   let content;
   if (view === "reader") content = readerScreen();
@@ -222,6 +224,19 @@ function render() {
   if (transitionDirection && reader.transitionDirection === transitionDirection) reader.transitionDirection = "";
   bindEvents();
   syncReaderStatus();
+}
+
+function syncReaderViewportHeight() {
+  const browserHeight = Math.max(window.innerHeight || 0, document.documentElement.clientHeight || 0);
+  const standalone = window.matchMedia?.("(display-mode: standalone)").matches || window.navigator.standalone === true;
+  let targetHeight = browserHeight;
+  if (standalone && window.screen) {
+    const portrait = window.matchMedia?.("(orientation: portrait)").matches !== false;
+    const screenHeight = portrait ? Math.max(window.screen.width, window.screen.height) : Math.min(window.screen.width, window.screen.height);
+    targetHeight = Math.max(targetHeight, screenHeight || 0);
+  }
+  readerViewportHeight = Math.max(320, Math.round(targetHeight));
+  document.documentElement.style.setProperty("--reader-viewport-height", `${readerViewportHeight}px`);
 }
 
 function shell(content, active) {
@@ -755,7 +770,7 @@ function paginate(text, fontSize) {
   const source = String(text || "");
   if (!source.trim()) return ["暂无正文。"]; 
   const normalizedFontSize = clamp(Number(fontSize) || 19, 16, 40);
-  const signature = [normalizedFontSize, settings.fontFamily, settings.fontWeight, settings.lineHeight, window.innerWidth, window.innerHeight].join("|");
+  const signature = [normalizedFontSize, settings.fontFamily, settings.fontWeight, settings.lineHeight, window.innerWidth, readerViewportHeight].join("|");
   const cachedIndex = paginationCache.findIndex((entry) => entry.text === source && entry.signature === signature);
   if (cachedIndex >= 0) {
     const [cached] = paginationCache.splice(cachedIndex, 1);

@@ -131,9 +131,10 @@ h2 { font-size: 19px; margin-bottom: 14px; }
 .theme-choice[data-theme="night"] { background: #173127; }
 .theme-choice.selected { border-color: var(--green-800); box-shadow: 0 0 0 3px #d7ead9; }
 
-body.reader-active { position: fixed; inset: 0; width: 100%; height: 100dvh; overflow: hidden; }
-body.reader-active .app-shell { height: 100dvh; min-height: 0; }
-.reader { position: relative; height: 100dvh; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; padding: env(safe-area-inset-top) 0 0; overflow: hidden; overscroll-behavior: none; transition: background .25s, color .25s; }
+body.reader-active { position: fixed; inset: 0; width: 100%; height: var(--reader-viewport-height, 100vh); overflow: hidden; }
+body.reader-active .app-shell { height: var(--reader-viewport-height, 100vh); min-height: 0; }
+body.reader-active .reader:not(.pagination-probe) { position: fixed; top: 0; bottom: auto; left: 50%; width: min(560px, 100%); transform: translateX(-50%); }
+.reader { position: relative; height: var(--reader-viewport-height, 100vh); min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; padding: env(safe-area-inset-top) 0 0; overflow: hidden; overscroll-behavior: none; transition: background .25s, color .25s; }
 .reader.pagination-probe { position: fixed; z-index: -1; top: 0; left: 50%; width: min(560px, 100vw); margin: 0; transform: translateX(-50%); visibility: hidden; pointer-events: none; }
 .reader.theme-bamboo { background: #eaf4e9; color: #22382b; }
 .reader.theme-paper { background: #fbfaf2; color: #302e29; }
