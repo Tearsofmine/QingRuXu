@@ -42,11 +42,7 @@ const sampleBooks = [
   }
 ];
 
-const sourceSamples = [
-  { id: "source-1", title: "公版作品示例", author: "已授权 / 公版书源", status: "可读 · 完结", source: "合规书源演示" },
-  { id: "source-2", title: "连载作品示例", author: "已授权内容", status: "连载至第 128 章", source: "合规书源演示" },
-  { id: "source-3", title: "中文经典示例", author: "公版整理", status: "可读 · 完结", source: "合规书源演示" }
-];
+const onlineSearch = { query: "", phase: "idle", results: [], message: "", preview: null, controller: null, task: 0, progress: null, savedId: "" };
 
 let library = loadLibrary();
 let settings = loadSettings();
@@ -626,18 +622,32 @@ function emptyShelf() {
 }
 
 function searchScreen() {
+  const busy = ["searching", "previewing", "downloading", "saving"].includes(onlineSearch.phase);
+  const preview = onlineSearch.preview;
+  const progress = onlineSearch.progress;
+  let status = "";
+  if (onlineSearch.phase === "searching") status = '<p class="online-status" role="status">正在搜索中文维基文库…</p>';
+  if (onlineSearch.phase === "previewing") status = '<p class="online-status" role="status">正在读取目录与正文预览…</p>';
+  if (onlineSearch.phase === "results" && !onlineSearch.results.length) status = '<p class="online-status">当前来源没有匹配结果。可换一个书名或版本名称；这里暂不覆盖大多数现代网文。</p>';
+  if (onlineSearch.phase === "error") status = `<p class="online-error" role="alert">${escapeHTML(onlineSearch.message)}</p>`;
+  if (onlineSearch.phase === "idle") status = '<p class="online-status">输入书名开始搜索，也可试试下方作品。首次下载需要联网，保存后可以离线阅读。</p>';
+  if (onlineSearch.phase === "success") status = `<div class="online-status" role="status">正文已保存到这台设备。<button class="primary-button" data-open-book="${escapeHTML(onlineSearch.savedId)}">开始阅读</button></div>`;
+  if (onlineSearch.phase === "cancelled") status = '<p class="online-status">已取消，未将未下载完整的内容加入书架。</p>';
   return shell(`
     <header class="topbar"><div class="brand"><span class="brand-mark">清</span>找书</div><button class="icon-button" data-nav="shelf" aria-label="回到书架">⌂</button></header>
-    <h1>去找下一本故事</h1><p class="subtle">输入书名或作者，清如许会查询已接入的合规书源。</p>
-    <form class="search-box" id="search-form"><span>⌕</span><input id="book-query" placeholder="书名、作者或关键词" autocomplete="off" /><button aria-label="搜索">搜</button></form>
-    <div class="filter-row"><button class="chip active">全部</button><button class="chip">可读</button><button class="chip">完结</button><button class="chip">连载</button></div>
-    <div class="notice">这是原型搜索结果。正式版只显示已授权或公版内容，不收录未获许可的第三方小说站。</div>
-    <div class="result-list" id="result-list">${sourceSamples.map(resultCard).join("")}</div>
+    <h1>找到，带回书架</h1><p class="subtle">搜索书名，预览正文，再保存到清如许阅读。</p>
+    <form class="search-box" id="search-form"><span>⌕</span><input id="book-query" placeholder="输入书名，如：西游记" aria-label="搜索书名" value="${escapeHTML(onlineSearch.query)}" maxlength="100" autocomplete="off" enterkeyhint="search" ${busy ? "disabled" : ""} /><button aria-label="搜索" ${busy ? "disabled" : ""}>搜</button></form>
+    <div class="filter-row"><button class="chip" data-online-example="西游记" ${busy ? "disabled" : ""}>西游记</button><button class="chip" data-online-example="三国演义" ${busy ? "disabled" : ""}>三国演义</button><button class="chip" data-online-example="聊斋志异" ${busy ? "disabled" : ""}>聊斋志异</button></div>
+    <div class="notice">已接入：中文维基文库 · 以古典小说和公版作品为主，暂不覆盖大多数现代网文。搜索词会发送给该来源，书架与本地小说不会上传。</div>
+    ${status}
+    ${busy && onlineSearch.phase !== "saving" ? '<button class="secondary-button" data-online-action="cancel">取消</button>' : ""}
+    ${preview ? `<article class="online-preview"><span class="source-tag">中文维基文库</span><h2>${escapeHTML(preview.title)}</h2><p class="subtle">${escapeHTML(preview.author)} · ${preview.root.children.length ? `目录有 ${preview.root.children.length} 个入口，下载时展开分卷` : "单篇作品"}</p><p class="online-preview-text">${escapeHTML(preview.first.text.slice(0, 420))}${preview.first.text.length > 420 ? "…" : ""}</p><a href="${escapeHTML(preview.sourceUrl)}" target="_blank" rel="noopener noreferrer">查看原文与版本说明</a><p class="subtle">将下载目录内的正文；网络中断可重试。全部下载并保存成功后才会加入书架。最多 500 个正文页。</p>${onlineSearch.phase === "downloading" ? `<p id="online-progress" class="online-status" role="status">${progress ? `已获取 ${progress.done} 章 · ${escapeHTML(progress.title)}` : "正在准备下载…"}</p>` : ""}${onlineSearch.phase === "saving" ? '<p role="status">正在保存到本机，请稍候…</p>' : ""}<button class="primary-button" data-online-action="download" ${busy ? "disabled" : ""}>${onlineSearch.phase === "error" ? "重新下载并加入书架" : "下载正文并加入书架"}</button></article>` : ""}
+    <div class="result-list" id="result-list">${onlineSearch.results.map((item, index) => resultCard(item, index, busy)).join("")}</div>
   `, "search");
 }
 
-function resultCard(item) {
-  return `<article class="result-card"><div class="result-cover">${escapeHTML(item.title.slice(0, 6))}</div><div><div class="result-title">${escapeHTML(item.title)}</div><div class="result-meta">${escapeHTML(item.author)} · ${escapeHTML(item.status)}</div><span class="source-tag">${escapeHTML(item.source)}</span></div><button class="add-button" data-add-source="${item.id}">加入</button></article>`;
+function resultCard(item, index, busy) {
+  return `<article class="result-card"><div class="result-cover">${escapeHTML(item.title.slice(0, 6))}</div><div><div class="result-title">${escapeHTML(item.title)}</div><div class="result-meta">${escapeHTML(item.snippet.slice(0, 90))}</div><span class="source-tag">中文维基文库 · ${item.title.includes("消歧") ? "同名索引" : "文字版本待预览"}</span></div><button class="add-button" data-online-preview="${index}" ${busy ? "disabled" : ""}>预览</button></article>`;
 }
 
 function settingsScreen() {
@@ -650,7 +660,7 @@ function settingsScreen() {
       <article class="settings-card"><h3>阅读方式</h3><p>默认左右翻页。点击阅读页中央可打开目录、书签和字号调整。</p></article>
       <article class="settings-card"><h3>本地导入</h3><p>支持 UTF-8、GB18030、UTF-16 TXT；会在浏览器本地保存副本，不会移动或删除原文件。EPUB 阅读将在原生 App 阶段支持。</p><button class="primary-button" data-action="import">导入 TXT</button></article>
       <article class="settings-card backup-card"><h3>书架备份</h3><p>把小说、进度、书签和阅读设置保存成一个本地文件。恢复时会安全合并，不清空现有书架。</p><span class="backup-summary">当前 ${library.length} 本书 · 不需要账号</span><div class="backup-actions"><button class="secondary-button" data-backup-action="choose">恢复备份</button><button class="primary-button" data-backup-action="export">导出备份</button></div></article>
-      <article class="settings-card"><h3>原型说明</h3><p>这个版本用于确认体验和视觉。联网找书为界面演示，尚未连接真实书源。</p></article>
+      <article class="settings-card"><h3>清如许 v34</h3><p>找书已接入中文维基文库，可预览和下载文字正文。主要覆盖古典小说与公版作品，尚未接入现代网文平台。</p></article>
     </div>
   `, "settings");
 }
@@ -750,7 +760,7 @@ function chapterSheet(book) {
   const chapterEntries = book.chapters.map((chapter, index) => ({ chapter, index }));
   if (descending) chapterEntries.reverse();
   const content = showingBookmarks ? bookmarkPanel(book, bookmarks) : `<div class="chapter-search"><span aria-hidden="true">⌕</span><input id="chapter-search" value="${escapeHTML(query)}" placeholder="搜索章节" autocomplete="off" enterkeyhint="search" /></div><div class="chapter-directory-meta"><span id="chapter-result-meta">共 ${book.chapters.length} 章 · 当前第 ${reader.chapter + 1} 章</span><button data-reader-action="toggle-chapter-order" aria-label="切换目录顺序">${descending ? "倒序 ↓" : "正序 ↑"}</button></div><p class="chapter-search-empty" id="chapter-search-empty" hidden>没有匹配的章节</p><div class="chapter-list" id="chapter-list">${chapterEntries.map(({ chapter, index }) => `<button class="${index === reader.chapter ? "active" : ""}" data-chapter="${index}"><span>${escapeHTML(chapter.title)}</span>${index === reader.chapter ? `<em>正在读</em>` : ""}</button>`).join("")}</div>`;
-  return `<aside class="sheet" id="chapter-sheet" ${reader.sheetOpen ? "" : "hidden"}><button class="sheet-backdrop" data-reader-action="close-chapters" aria-label="关闭目录并返回阅读"></button><div class="sheet-content"><div class="sheet-handle"></div><div class="sheet-head"><div><h2>${escapeHTML(book.title)}</h2><p class="subtle">目录与书签</p></div><button class="close" data-reader-action="close-chapters" aria-label="关闭目录">×</button></div><div class="chapter-tabs"><button class="${showingBookmarks ? "" : "active"}" data-reader-action="show-chapters">目录</button><button class="${showingBookmarks ? "active" : ""}" data-reader-action="show-bookmarks">书签${bookmarks.length ? ` (${bookmarks.length})` : ""}</button></div>${content}</div></aside>`;
+  return `<aside class="sheet" id="chapter-sheet" ${reader.sheetOpen ? "" : "hidden"}><button class="sheet-backdrop" data-reader-action="close-chapters" aria-label="关闭目录并返回阅读"></button><div class="sheet-content"><div class="sheet-handle"></div><div class="sheet-head"><div><h2>${escapeHTML(book.title)}</h2><p class="subtle">目录与书签 ${safeSourceUrl(book.sourceUrl) ? `<a href="${escapeHTML(safeSourceUrl(book.sourceUrl))}" target="_blank" rel="noopener noreferrer">原文与署名</a>` : ""}</p></div><button class="close" data-reader-action="close-chapters" aria-label="关闭目录">×</button></div><div class="chapter-tabs"><button class="${showingBookmarks ? "" : "active"}" data-reader-action="show-chapters">目录</button><button class="${showingBookmarks ? "active" : ""}" data-reader-action="show-bookmarks">书签${bookmarks.length ? ` (${bookmarks.length})` : ""}</button></div>${content}</div></aside>`;
 }
 
 function getBookBookmarks(book) {
@@ -978,10 +988,12 @@ function bindEvents() {
   if (shelfEditForm) shelfEditForm.addEventListener("submit", (event) => { event.preventDefault(); void saveBookInfo(shelfAction.bookId); });
   const encodingControl = document.querySelector("[data-import-encoding]");
   if (encodingControl) encodingControl.addEventListener("change", () => { importSession.encoding = encodingControl.value; });
-  document.querySelectorAll("[data-add-source]").forEach((el) => el.addEventListener("click", () => addDemoSource(el.dataset.addSource)));
+  document.querySelectorAll("[data-online-preview]").forEach((el) => el.addEventListener("click", () => previewOnlineBook(Number(el.dataset.onlinePreview))));
+  document.querySelectorAll("[data-online-example]").forEach((el) => el.addEventListener("click", () => runOnlineSearch(el.dataset.onlineExample)));
+  document.querySelectorAll("[data-online-action]").forEach((el) => el.addEventListener("click", () => el.dataset.onlineAction === "cancel" ? cancelOnlineTask() : downloadOnlineBook()));
   document.querySelectorAll("[data-theme]").forEach((el) => el.addEventListener("click", () => { settings.theme = el.dataset.theme; persist(); render(); }));
   const form = document.querySelector("#search-form");
-  if (form) form.addEventListener("submit", searchDemo);
+  if (form) form.addEventListener("submit", (event) => { event.preventDefault(); runOnlineSearch(document.querySelector("#book-query").value); });
   document.querySelectorAll("[data-reader-action]").forEach((el) => el.addEventListener("click", () => readerAction(el.dataset.readerAction)));
   document.querySelectorAll("[data-chapter]").forEach((el) => el.addEventListener("click", () => goToChapter(Number(el.dataset.chapter))));
   document.querySelectorAll("[data-bookmark]").forEach((el) => el.addEventListener("click", () => goToBookmark(el.dataset.bookmark)));
@@ -1521,20 +1533,113 @@ function bindSwipe(element) {
   }));
 }
 
-function searchDemo(event) {
-  event.preventDefault();
-  const query = document.querySelector("#book-query").value.trim();
-  const list = document.querySelector("#result-list");
-  if (!query) { showToast("请输入书名、作者或关键词"); return; }
-  list.innerHTML = sourceSamples.map((item, index) => resultCard({ ...item, title: index === 0 ? `${query} · 示例结果` : item.title })).join("");
-  bindEvents();
+function refreshOnlineSearch() { if (view === "search") render(); }
+
+function beginOnlineTask(phase) {
+  onlineSearch.controller?.abort();
+  onlineSearch.controller = new AbortController();
+  onlineSearch.task += 1;
+  onlineSearch.phase = phase;
+  onlineSearch.message = "";
+  onlineSearch.progress = null;
+  return { id: onlineSearch.task, signal: onlineSearch.controller.signal };
 }
 
-function addDemoSource(id) {
-  const item = sourceSamples.find((entry) => entry.id === id);
-  const importedAt = Date.now();
-  const book = { id: `demo-${importedAt}`, title: item.title, author: item.author, source: item.source, progress: 0, importedAt, chapters: [{ title: "第一章  内容接入说明", text: "这是用于验证加入书架流程的演示内容。\n\n正式版会在与版权方、开放内容库或授权书源完成接入后，显示对应书籍的真实章节。" }] };
-  library.unshift(book); persist(); showToast("已加入书架"); view = "shelf"; render();
+function cancelOnlineTask() {
+  if (onlineSearch.phase === "saving") return;
+  onlineSearch.controller?.abort();
+  onlineSearch.task += 1;
+  onlineSearch.phase = "cancelled";
+  refreshOnlineSearch();
+}
+
+function onlineFailure(error, task) {
+  if (task.id !== onlineSearch.task || task.signal.aborted) return;
+  onlineSearch.phase = "error";
+  onlineSearch.message = error?.message || "暂时无法读取书源，请稍后重试。";
+  refreshOnlineSearch();
+}
+
+async function runOnlineSearch(value) {
+  if (["downloading", "saving"].includes(onlineSearch.phase)) return;
+  const query = String(value || "").trim().slice(0, 100);
+  if (!query) { showToast("请输入书名"); return; }
+  const task = beginOnlineTask("searching");
+  onlineSearch.query = query;
+  onlineSearch.results = [];
+  onlineSearch.preview = null;
+  refreshOnlineSearch();
+  try {
+    const results = await QrxSources.search(query, task.signal);
+    if (task.id !== onlineSearch.task) return;
+    onlineSearch.results = results;
+    onlineSearch.phase = "results";
+    refreshOnlineSearch();
+  } catch (error) { onlineFailure(error, task); }
+}
+
+async function previewOnlineBook(index) {
+  if (["downloading", "saving"].includes(onlineSearch.phase)) return;
+  const item = onlineSearch.results[index];
+  if (!item) return;
+  const task = beginOnlineTask("previewing");
+  onlineSearch.preview = null;
+  refreshOnlineSearch();
+  try {
+    const preview = await QrxSources.prepare(item.title, task.signal);
+    if (task.id !== onlineSearch.task) return;
+    onlineSearch.preview = preview;
+    onlineSearch.phase = "preview";
+    refreshOnlineSearch();
+  } catch (error) { onlineFailure(error, task); }
+}
+
+async function downloadOnlineBook() {
+  if (!onlineSearch.preview || ["downloading", "saving"].includes(onlineSearch.phase)) return;
+  const preview = onlineSearch.preview;
+  const task = beginOnlineTask("downloading");
+  refreshOnlineSearch();
+  try {
+    if (!libraryReady) await libraryReadyPromise;
+    if (task.id !== onlineSearch.task) return;
+    const existing = library.find((book) => book.sourceUrl === preview.sourceUrl);
+    if (existing) {
+      onlineSearch.savedId = existing.id;
+      onlineSearch.preview = null;
+      onlineSearch.phase = "success";
+      showToast("这本书已经在书架中");
+      refreshOnlineSearch();
+      return;
+    }
+    const downloaded = await QrxSources.download(preview, task.signal, (progress) => {
+      if (task.id !== onlineSearch.task) return;
+      onlineSearch.progress = progress;
+      const status = document.querySelector("#online-progress");
+      if (status) status.textContent = `已获取 ${progress.done} 章 · 正在处理 ${progress.title}`;
+    });
+    if (task.id !== onlineSearch.task || task.signal.aborted) return;
+    onlineSearch.phase = "saving";
+    refreshOnlineSearch();
+    const book = { ...downloaded, id: newLocalBookId(), progress: 0, bookmarks: [], importedAt: Date.now() };
+    library.unshift(book);
+    if (!(await persist())) {
+      library = library.filter((entry) => entry.id !== book.id);
+      if (view !== "search") render();
+      throw new Error("正文下载完成，但本机保存失败。未加入书架，请检查可用存储空间后重试。");
+    }
+    onlineSearch.savedId = book.id;
+    onlineSearch.phase = "success";
+    onlineSearch.preview = null;
+    showToast(`已保存 ${book.chapters.length} 章，可以离线阅读`);
+    render();
+  } catch (error) { onlineFailure(error, task); }
+}
+
+function safeSourceUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return url.protocol === "https:" && url.hostname === "zh.wikisource.org" && !url.username && !url.password ? url.href : "";
+  } catch { return ""; }
 }
 
 function createBackupError(code, detail = "") {
@@ -1594,7 +1699,7 @@ function sanitizeBackupBook(value, index) {
   if (!value || typeof value !== "object" || !Array.isArray(value.chapters) || !value.chapters.length) throw createBackupError("backup-content", `第 ${index + 1} 本书缺少章节。`);
   const chapters = value.chapters.map((chapter, chapterIndex) => {
     if (!chapter || typeof chapter !== "object" || typeof chapter.text !== "string") throw createBackupError("backup-content", `第 ${index + 1} 本书的第 ${chapterIndex + 1} 章内容损坏。`);
-    return { title: String(chapter.title || `第 ${chapterIndex + 1} 章`).slice(0, 120), text: chapter.text };
+    return { title: String(chapter.title || `第 ${chapterIndex + 1} 章`).slice(0, 120), text: chapter.text, sourceUrl: safeSourceUrl(chapter.sourceUrl), sourceRevision: Math.max(0, Number(chapter.sourceRevision) || 0) };
   });
   const sourceId = String(value.id || "");
   const id = /^[a-z0-9][a-z0-9_-]{0,159}$/i.test(sourceId) ? sourceId : newLocalBookId();
@@ -1617,6 +1722,9 @@ function sanitizeBackupBook(value, index) {
     title: String(value.title || `恢复的小说 ${index + 1}`).slice(0, 180),
     author: String(value.author || "本地恢复").slice(0, 120),
     source: String(value.source || "清如许备份").slice(0, 120),
+    sourceUrl: safeSourceUrl(value.sourceUrl),
+    sourceNotice: String(value.sourceNotice || "").slice(0, 8000),
+    sourceLicenseUrl: safeSourceUrl(value.sourceLicenseUrl),
     progress: clamp(Number(value.progress) || 0, 0, 1),
     contentFingerprint: String(value.contentFingerprint || "").slice(0, 220),
     importedAt: Math.max(0, Number(value.importedAt) || 0),

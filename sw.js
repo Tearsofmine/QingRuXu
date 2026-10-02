@@ -1,5 +1,5 @@
-const CACHE = "qingruxu-v33";
-const FILES = ["./", "./index.html", "./styles.css?v=33", "./app.js?v=33", "./manifest.webmanifest?v=33", "./assets/icon.svg"];
+const CACHE = "qingruxu-v34";
+const FILES = ["./", "./index.html", "./styles.css?v=34", "./online-source.js?v=34", "./app.js?v=34", "./manifest.webmanifest?v=34", "./assets/icon.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(FILES)));
@@ -8,7 +8,7 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))
+    caches.keys().then((keys) => Promise.all(keys.filter((key) => key.startsWith("qingruxu-") && key !== CACHE).map((key) => caches.delete(key))))
   );
   self.clients.claim();
 });

@@ -114,6 +114,16 @@ h2 { font-size: 19px; margin-bottom: 14px; }
 .result-meta { font-size: 12px; color: var(--muted); line-height: 1.45; }
 .source-tag { display: inline-block; margin-top: 6px; color: var(--green-700); font-size: 11px; background: #e7f2e8; padding: 3px 6px; border-radius: 5px; }
 .add-button { border: 0; color: white; background: var(--green-800); padding: 9px 10px; border-radius: 11px; font-size: 12px; font-weight: 700; }
+button:disabled { opacity: .5; cursor: default; }
+.online-status, .online-error { padding: 14px; border-radius: 14px; font-size: 14px; line-height: 1.65; background: #e3efe4; color: var(--green-950); }
+.online-status .primary-button { display: block; }
+.online-error { color: #903e38; background: #fff0ed; }
+.online-preview { margin: 16px 0; padding: 18px; border: 1px solid var(--line); border-radius: 18px; background: var(--paper); }
+.online-preview h2 { margin: 10px 0; }
+.online-preview-text { max-height: 260px; overflow-y: auto; white-space: pre-wrap; line-height: 1.8; font-size: 16px; }
+.online-preview a, .sheet-head a { color: var(--green-700); font-size: 12px; }
+.online-preview > .subtle { font-size: 13px; line-height: 1.6; }
+.online-preview > .primary-button { width: 100%; }
 
 .empty-state { border: 1px dashed #b7cfba; border-radius: 22px; padding: 30px 20px; background: rgba(255,255,255,.46); text-align: center; margin-top: 42px; }
 .empty-icon { font-size: 34px; margin-bottom: 9px; }
