@@ -1,5 +1,5 @@
-const CACHE = "qingruxu-v34";
-const FILES = ["./", "./index.html", "./styles.css?v=34", "./online-source.js?v=34", "./app.js?v=34", "./manifest.webmanifest?v=34", "./assets/icon.svg"];
+const CACHE = "qingruxu-v36.6.1";
+const FILES = ["./", "./index.html", "./styles.css?v=36.6.1", "./online-source.js?v=36.6.1", "./app.js?v=36.6.1", "./manifest.webmanifest?v=36.6.1", "./assets/icon.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(FILES)));
@@ -14,6 +14,13 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-  if (event.request.method !== "GET") return;
+  if (event.request.method !== "GET" || new URL(event.request.url).pathname.startsWith('/qrx-api/')) return;
+  if (event.request.mode === "navigate" && new URL(event.request.url).origin === self.location.origin) {
+    event.respondWith(fetch(event.request).then(async (response) => {
+      if (response.ok) await (await caches.open(CACHE)).put('./index.html', response.clone());
+      return response;
+    }).catch(async () => (await caches.match('./index.html')) || Response.error()));
+    return;
+  }
   event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request)));
 });

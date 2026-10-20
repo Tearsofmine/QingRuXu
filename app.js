@@ -11,38 +11,14 @@ const BACKUP_FORMAT = "qingruxu-backup";
 const BACKUP_VERSION = 1;
 const BACKUP_MAX_BYTES = 250 * 1024 * 1024;
 
-const sampleBooks = [
-  {
-    id: "sample-spring",
-    title: "春山有信",
-    author: "清如许原型",
-    source: "原型示例",
-    progress: 0.34,
-    chapters: [
-      { title: "第一章  雨后", text: "雨停的时候，山脚下的雾还没有散尽。\n\n沈遥推开旧书铺的木门，门铃轻轻响了一声。柜台后的人抬起头，指尖仍压在一页微黄的纸上。\n\n“找书吗？”他问。\n\n沈遥点头。她只记得那本书的开头有一句：山很远，灯很近。\n\n书铺里静了片刻。窗外的水珠从檐角落下，一下一下，像有人在很远的地方翻页。" },
-      { title: "第二章  灯下", text: "天色暗下来，书铺里的灯一盏盏亮起。\n\n他从最里面的书架取下一册薄书，封面没有名字，只印着一枝淡青色的竹。\n\n“也许是这本。”\n\n沈遥接过书，纸页带着极浅的草木香。她翻到第一页，看见那行熟悉的字：山很远，灯很近。" },
-      { title: "第三章  归途", text: "离开书铺时，街上的雾已经散了。\n\n沈遥把书抱在怀里，忽然觉得整座城都安静下来。远处的路灯亮着，像故事还没说完的逗号。\n\n她知道，明天还会再来。" }
-    ]
-  },
-  {
-    id: "sample-north",
-    title: "北窗记事",
-    author: "清如许原型",
-    source: "原型示例",
-    progress: 0,
-    chapters: [{ title: "第一章", text: "这是一册用于展示书架的原型文本。\n\n正式版将由你导入自己的 TXT，或从已接入的合规书源加入书架。" }]
-  },
-  {
-    id: "sample-river",
-    title: "江湖夜话",
-    author: "清如许原型",
-    source: "原型示例",
-    progress: 0,
-    chapters: [{ title: "第一章", text: "山河遥远，故事正要开始。" }]
-  }
-];
+const LEGACY_DEMO_IDS = new Set(["sample-spring", "sample-north", "sample-river"]);
+function withoutDemoBooks(books) {
+  // Identify bundled examples by their original ID and origin, never by title:
+  // a user-imported novel with the same title must remain untouched.
+  return books.filter(book => !(LEGACY_DEMO_IDS.has(book?.id) && book?.source === "原型示例"));
+}
 
-const onlineSearch = { query: "", phase: "idle", results: [], message: "", preview: null, controller: null, task: 0, progress: null, savedId: "" };
+const onlineSearch = { query: "", phase: "idle", results: [], message: "", preview: null, controller: null, task: 0, progress: null, savedId: "", outcomes: [] };
 
 let library = loadLibrary();
 let settings = loadSettings();
@@ -63,6 +39,7 @@ let shelfQuery = "";
 let backupSession = emptyBackupSession();
 const paginationCache = [];
 let readerViewportHeight = window.innerHeight;
+const remoteReadRequest = { sequence: 0, controller: null };
 
 const app = document.querySelector("#app");
 const picker = document.querySelector("#file-picker");
@@ -71,8 +48,8 @@ const backupPicker = document.querySelector("#backup-picker");
 function loadLibrary() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    return Array.isArray(saved) && saved.length ? saved : sampleBooks;
-  } catch { return sampleBooks; }
+    return Array.isArray(saved) ? withoutDemoBooks(saved) : [];
+  } catch { return []; }
 }
 
 function loadSettings() {
@@ -184,8 +161,8 @@ async function hydrateLibrary() {
   try {
     const saved = await readLibraryFromDatabase();
     if (saved.initialized) {
-      library = saved.books;
-      if (saved.migratedFromLegacy) await persist();
+      library = withoutDemoBooks(saved.books);
+      if (saved.migratedFromLegacy || library.length !== saved.books.length) await persist();
       render();
       return;
     }
@@ -236,7 +213,20 @@ function syncReaderViewportHeight() {
 }
 
 function shell(content, active) {
-  return `<section class="screen">${content}</section>${tabbar(active)}`;
+  return `<section class="screen screen-${active}">${content}</section>${tabbar(active)}`;
+}
+
+function uiIcon(name, size = 22) {
+  const paths = {
+    shelf: '<path d="M4 4h5v16H4zM11 4h4v16h-4zM17 5l3-1 3 15-3 1z"/>',
+    search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4.5 4.5"/>',
+    settings: '<path d="M4 7h16M4 17h16"/><circle cx="8" cy="7" r="2.5" fill="currentColor" stroke="none"/><circle cx="16" cy="17" r="2.5" fill="currentColor" stroke="none"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    arrow: '<path d="m9 5 7 7-7 7"/>',
+    book: '<path d="M12 6C8 3 4 4 2 5v14c3-1 6-1 10 1 4-2 7-2 10-1V5c-2-1-6-2-10 1Zm0 0v14M5 9l4 1M5 13l4 1M15 10l4-1M15 14l4-1"/>',
+    upload: '<path d="M12 16V3m-5 5 5-5 5 5M4 15v5h16v-5"/>'
+  };
+  return `<svg class="ui-icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.book}</svg>`;
 }
 
 function emptyImportSession() {
@@ -486,9 +476,9 @@ function shelfActionOverlay() {
 
 function tabbar(active) {
   return `<nav class="tabbar" aria-label="主导航">
-    <button class="tab ${active === "shelf" ? "active" : ""}" data-nav="shelf"><i>▦</i>书架</button>
-    <button class="tab ${active === "search" ? "active" : ""}" data-nav="search"><i>⌕</i>找书</button>
-    <button class="tab ${active === "settings" ? "active" : ""}" data-nav="settings"><i>◌</i>我的</button>
+    <button class="tab ${active === "shelf" ? "active" : ""}" data-nav="shelf">${uiIcon("shelf")}<span>书架</span></button>
+    <button class="tab ${active === "search" ? "active" : ""}" data-nav="search">${uiIcon("search")}<span>找书</span></button>
+    <button class="tab ${active === "settings" ? "active" : ""}" data-nav="settings">${uiIcon("settings")}<span>我的</span></button>
   </nav>`;
 }
 
@@ -522,6 +512,7 @@ function bookReadingStatus(book) {
   const progress = Math.round(clamp(Number(book?.progress) || 0, 0, 1) * 100);
   const chapterIndex = clamp(Number(book?.readingPosition?.chapter) || 0, 0, Math.max(0, (book?.chapters?.length || 1) - 1));
   const chapterTitle = book?.chapters?.[chapterIndex]?.title || "";
+  if (isOnlineBook(book)) return { label: `${book.lastReadAt ? chapterTitle : "按章阅读"} · 已缓存 ${book.chapters.filter(chapter => chapter.text.trim()).length}/${book.chapters.length} 章`, progress };
   if (progress >= 100) return { label: "已读完", progress };
   if (progress > 0 || book?.lastReadAt) return { label: chapterTitle ? `已读 ${progress}% · ${chapterTitle}` : `已读 ${progress}%`, progress };
   return { label: "未开始", progress: 0 };
@@ -533,12 +524,12 @@ function onlineCoverUrl(coverId, size = "M") {
 }
 
 const generatedCoverThemes = [
-  ["#183f31", "#4f8c68", "#dcefdc"],
-  ["#263c59", "#718dab", "#e2ebf2"],
-  ["#51342c", "#ad765f", "#f0dfcf"],
-  ["#3d3154", "#8c76a3", "#eee5f1"],
-  ["#51441f", "#b09143", "#f1e8c7"],
-  ["#23464a", "#59959a", "#d9eeee"]
+  ["#d9e4d5", "#c2d0b9", "#35503b"],
+  ["#dfe4e7", "#c5d1d7", "#3b5360"],
+  ["#ebe0d6", "#d9c3b2", "#6d5141"],
+  ["#e5dfe8", "#d0c5d7", "#5f4e6c"],
+  ["#e9e3d1", "#d6c9a9", "#6c5d36"],
+  ["#dbe7e2", "#b7cec4", "#3e5e51"]
 ];
 
 function generatedCoverIndex(book) {
@@ -550,7 +541,7 @@ function generatedCoverIndex(book) {
 
 function bookCoverMarkup(book, className = "") {
   const coverUrl = onlineCoverUrl(book?.coverId, "M");
-  const generated = !coverUrl && Number(book?.coverStyle) > 0;
+  const generated = !coverUrl;
   const colors = generatedCoverThemes[generatedCoverIndex(book)];
   const style = generated ? ` style="--cover-deep:${colors[0]};--cover-mid:${colors[1]};--cover-light:${colors[2]}"` : "";
   const author = coverSearchAuthor(book);
@@ -563,24 +554,22 @@ function shelfScreen() {
   const currentChapter = book?.chapters?.[Math.max(0, Math.min(book?.readingPosition?.chapter || 0, (book?.chapters?.length || 1) - 1))]?.title || "";
   const continueReading = book ? `<button class="now-reading" data-open-book="${book.id}">
       ${bookCoverMarkup(book, "cover-mini")}
-      <span><span class="continue-label">继续阅读</span><strong class="now-title">${escapeHTML(book.title)}</strong><span class="now-meta">${escapeHTML(currentChapter)}</span><span class="progress-track"><span class="progress-fill" style="width:${progress}%"></span></span><span class="now-meta">已读 ${progress}%</span></span>
-    </button>` : `<section class="shelf-welcome"><span>书架已经准备好</span><strong>导入第一本小说吧</strong><p>TXT 会保存在这台设备中，不需要注册。</p></section>`;
+      <span class="now-copy"><span class="continue-label">接着上次的故事</span><strong class="now-title">${escapeHTML(book.title)}</strong><span class="now-meta">${escapeHTML(currentChapter)}<span> · ${progress}%</span></span></span><span class="now-arrow">${uiIcon("arrow",18)}</span>
+    </button>` : "";
   const normalizedQuery = normalizeShelfText(shelfQuery);
   const books = shelfBooksInDisplayOrder();
   const matchedBooks = books.filter((item) => !normalizedQuery || shelfSearchText(item).includes(normalizedQuery));
-  const sortName = { recent: "最近阅读", imported: "最近导入", title: "书名" }[settings.shelfSort] || "最近阅读";
   const shelfControls = library.length ? `<div class="shelf-controls">
-      <div class="shelf-search"><span aria-hidden="true">⌕</span><input id="shelf-query" value="${escapeHTML(shelfQuery)}" placeholder="搜索书名或作者" autocomplete="off" aria-label="搜索本地书架" /><button id="shelf-query-clear" type="button" data-shelf-control="clear-search" aria-label="清除搜索" ${normalizedQuery ? "" : "hidden"}>×</button></div>
-      <div class="shelf-sort-row" aria-label="书架排序"><span>排序</span><button class="${settings.shelfSort === "recent" ? "active" : ""}" data-shelf-sort="recent">最近阅读</button><button class="${settings.shelfSort === "imported" ? "active" : ""}" data-shelf-sort="imported">最近导入</button><button class="${settings.shelfSort === "title" ? "active" : ""}" data-shelf-sort="title">书名</button></div>
+      <div class="shelf-search">${uiIcon("search",18)}<input id="shelf-query" value="${escapeHTML(shelfQuery)}" placeholder="在书架里找一找" autocomplete="off" aria-label="搜索本地书架" /><button id="shelf-query-clear" type="button" data-shelf-control="clear-search" aria-label="清除搜索" ${normalizedQuery ? "" : "hidden"}>×</button></div>
+      <div class="shelf-sort-row" aria-label="书架排序"><button class="${settings.shelfSort === "recent" ? "active" : ""}" data-shelf-sort="recent">最近阅读</button><button class="${settings.shelfSort === "imported" ? "active" : ""}" data-shelf-sort="imported">最近加入</button><button class="${settings.shelfSort === "title" ? "active" : ""}" data-shelf-sort="title">按书名</button></div>
       <p class="shelf-search-result" id="shelf-search-result" ${normalizedQuery ? "" : "hidden"}>找到 ${matchedBooks.length} 本</p>
     </div>` : "";
   return shell(`
-    <header class="topbar"><div class="brand"><span class="brand-mark">清</span>清如许</div><button class="round-button" data-action="import" aria-label="导入小说">+</button></header>
-    <p class="eyebrow">书卷多情似故人</p><h1>今天，读到哪里了？</h1>
+    <header class="topbar"><div class="brand wordmark">清如许<span>私人书房</span></div><button class="round-button" data-action="import" aria-label="导入小说">${uiIcon("plus")}</button></header>
+    <div class="page-heading"><h1>书架</h1><span>${library.length ? `${library.length} 本藏书` : "只收下，你想读的故事。"}</span></div>
     ${continueReading}
-    <div class="section-heading"><div><h2>我的书架</h2>${library.length ? `<span class="shelf-manage-hint">${library.length} 本 · ${sortName} · 长按书封面可管理</span>` : ""}</div><button class="text-button" data-action="import">导入小说</button></div>
     ${shelfControls}
-    ${library.length ? `<div class="shelf-grid" id="shelf-grid">${books.map((item) => bookCard(item, normalizedQuery && !shelfSearchText(item).includes(normalizedQuery))).join("")}</div><section class="shelf-filter-empty" id="shelf-filter-empty" ${matchedBooks.length ? "hidden" : ""}><span>⌕</span><strong>没有找到这本书</strong><p>试试书名、作者，或清除搜索词。</p><button class="secondary-button" data-shelf-control="clear-search">清除搜索</button></section>` : emptyShelf()}
+    ${library.length ? `<div class="shelf-grid" id="shelf-grid">${books.map((item) => bookCard(item, normalizedQuery && !shelfSearchText(item).includes(normalizedQuery))).join("")}</div><p class="shelf-footnote">长按书封，可以整理这本书</p><section class="shelf-filter-empty" id="shelf-filter-empty" ${matchedBooks.length ? "hidden" : ""}>${uiIcon("search",28)}<strong>这本书还不在书架里</strong><p>换个关键词，或看看其他藏书。</p><button class="secondary-button" data-shelf-control="clear-search">查看全部</button></section>` : emptyShelf()}
   `, "shelf");
 }
 
@@ -618,49 +607,67 @@ function clearShelfSearch() {
 }
 
 function emptyShelf() {
-  return `<section class="empty-state shelf-empty"><div class="empty-icon">⌁</div><h2>书架还是空的</h2><p>从“文件”导入一本 TXT，清如许会只保存在这台设备中。</p><button class="primary-button" data-action="import">导入第一本小说</button></section>`;
+  return `<section class="empty-state shelf-empty"><div class="empty-book-art" aria-hidden="true"><span></span>${uiIcon("book",86)}</div><h2>把喜欢的故事，放在这里</h2><p>导入一本 TXT，或去找一本新书。<br>不必登录，慢慢读就好。</p><button class="primary-button" data-action="import">${uiIcon("plus",18)}导入小说</button><button class="empty-find" data-nav="search">去找一本书 ${uiIcon("arrow",14)}</button></section>`;
 }
 
 function searchScreen() {
+  if (globalThis.QrxSources?.available === false) return shell(`
+    <header class="topbar"><div class="brand wordmark">清如许<span>私人书房</span></div><button class="text-button" data-action="import">${uiIcon("upload",17)}导入</button></header>
+    <div class="page-heading"><h1>找书</h1><span>遇见下一段故事</span></div>
+    <div class="search-idle">${uiIcon("book",46)}<h2>先把喜欢的故事带进来</h2><p>手机端书源后台尚未连接。<br>现在可以导入 TXT，继续安心阅读。</p><button class="primary-button" data-action="import">导入小说</button></div>
+    <details class="source-information search-source-note"><summary>为什么手机端暂时不能找书？</summary><p>GitHub Pages 只托管网页，不能运行书源后台。电脑本地服务不会自动同步到手机；后续需部署可访问的 HTTPS 后台。已导入的小说和已缓存章节不受影响。</p></details>
+  `, "search");
   const busy = ["searching", "previewing", "downloading", "saving"].includes(onlineSearch.phase);
   const preview = onlineSearch.preview;
   const progress = onlineSearch.progress;
   let status = "";
-  if (onlineSearch.phase === "searching") status = '<p class="online-status" role="status">正在搜索中文维基文库…</p>';
+  if (onlineSearch.phase === "searching") status = '<p class="online-status" role="status">正在自动查询已接入的免费渠道…</p>';
   if (onlineSearch.phase === "previewing") status = '<p class="online-status" role="status">正在读取目录与正文预览…</p>';
-  if (onlineSearch.phase === "results" && !onlineSearch.results.length) status = '<p class="online-status">当前来源没有匹配结果。可换一个书名或版本名称；这里暂不覆盖大多数现代网文。</p>';
+  if (onlineSearch.phase === "results" && !onlineSearch.results.length) status = `<p class="online-status">${onlineSearch.outcomes.some(o => o.status === "ok") ? "已接入的免费渠道暂无匹配作品；这不代表全网没有这本书。你仍可导入自己的 TXT。" : "免费渠道暂未返回有效结果，请查看连接详情；这不表示没有这本书。"}</p>`;
   if (onlineSearch.phase === "error") status = `<p class="online-error" role="alert">${escapeHTML(onlineSearch.message)}</p>`;
-  if (onlineSearch.phase === "idle") status = '<p class="online-status">输入书名开始搜索，也可试试下方作品。首次下载需要联网，保存后可以离线阅读。</p>';
-  if (onlineSearch.phase === "success") status = `<div class="online-status" role="status">正文已保存到这台设备。<button class="primary-button" data-open-book="${escapeHTML(onlineSearch.savedId)}">开始阅读</button></div>`;
+  if (onlineSearch.phase === "idle") status = `<div class="search-idle">${uiIcon("book",46)}<h2>想读哪一本？</h2><p>书名或作者，都可以。<br>找到后，再选喜欢的渠道。</p></div>`;
+  if (onlineSearch.phase === "success") status = `<div class="online-status" role="status">${isOnlineBook(library.find(book => book.id === onlineSearch.savedId)) ? "目录和首章已保存，后续章节阅读时联网加载。" : "正文已保存到这台设备。"}<button class="primary-button" data-open-book="${escapeHTML(onlineSearch.savedId)}">开始阅读</button></div>`;
   if (onlineSearch.phase === "cancelled") status = '<p class="online-status">已取消，未将未下载完整的内容加入书架。</p>';
   return shell(`
-    <header class="topbar"><div class="brand"><span class="brand-mark">清</span>找书</div><button class="icon-button" data-nav="shelf" aria-label="回到书架">⌂</button></header>
-    <h1>找到，带回书架</h1><p class="subtle">搜索书名，预览正文，再保存到清如许阅读。</p>
-    <form class="search-box" id="search-form"><span>⌕</span><input id="book-query" placeholder="输入书名，如：西游记" aria-label="搜索书名" value="${escapeHTML(onlineSearch.query)}" maxlength="100" autocomplete="off" enterkeyhint="search" ${busy ? "disabled" : ""} /><button aria-label="搜索" ${busy ? "disabled" : ""}>搜</button></form>
-    <div class="filter-row"><button class="chip" data-online-example="西游记" ${busy ? "disabled" : ""}>西游记</button><button class="chip" data-online-example="三国演义" ${busy ? "disabled" : ""}>三国演义</button><button class="chip" data-online-example="聊斋志异" ${busy ? "disabled" : ""}>聊斋志异</button></div>
-    <div class="notice">已接入：中文维基文库 · 以古典小说和公版作品为主，暂不覆盖大多数现代网文。搜索词会发送给该来源，书架与本地小说不会上传。</div>
+    <header class="topbar"><div class="brand wordmark">清如许<span>私人书房</span></div><button class="text-button" data-action="import">${uiIcon("upload",17)}导入</button></header>
+    <div class="page-heading"><h1>找书</h1><span>遇见下一段故事</span></div>
+    <form class="search-box" id="search-form">${uiIcon("search",20)}<input id="book-query" placeholder="书名 / 作者" aria-label="搜索书名" value="${escapeHTML(onlineSearch.query)}" maxlength="100" autocomplete="off" enterkeyhint="search" ${busy ? "disabled" : ""} /><button aria-label="搜索" ${busy ? "disabled" : ""}>搜索</button></form>
     ${status}
+    ${onlineSearch.outcomes.length ? `<div class="search-results-caption"><span>${groupOnlineResults(onlineSearch.results).length} 部作品</span><details class="source-outcomes"><summary>${onlineSearch.outcomes.filter(o=>o.status==="ok").length} / ${onlineSearch.outcomes.length} 个渠道已响应</summary>${onlineSearch.outcomes.map(o => `<p class="${o.status === "ok" ? "online-status" : "online-error"}"><strong>${escapeHTML(o.name)}</strong> · ${o.status === "ok" ? `匹配 ${o.results.length} 项` : escapeHTML(o.error)}</p>`).join("")}</details></div>` : ""}
     ${busy && onlineSearch.phase !== "saving" ? '<button class="secondary-button" data-online-action="cancel">取消</button>' : ""}
-    ${preview ? `<article class="online-preview"><span class="source-tag">中文维基文库</span><h2>${escapeHTML(preview.title)}</h2><p class="subtle">${escapeHTML(preview.author)} · ${preview.root.children.length ? `目录有 ${preview.root.children.length} 个入口，下载时展开分卷` : "单篇作品"}</p><p class="online-preview-text">${escapeHTML(preview.first.text.slice(0, 420))}${preview.first.text.length > 420 ? "…" : ""}</p><a href="${escapeHTML(preview.sourceUrl)}" target="_blank" rel="noopener noreferrer">查看原文与版本说明</a><p class="subtle">将下载目录内的正文；网络中断可重试。全部下载并保存成功后才会加入书架。最多 500 个正文页。</p>${onlineSearch.phase === "downloading" ? `<p id="online-progress" class="online-status" role="status">${progress ? `已获取 ${progress.done} 章 · ${escapeHTML(progress.title)}` : "正在准备下载…"}</p>` : ""}${onlineSearch.phase === "saving" ? '<p role="status">正在保存到本机，请稍候…</p>' : ""}<button class="primary-button" data-online-action="download" ${busy ? "disabled" : ""}>${onlineSearch.phase === "error" ? "重新下载并加入书架" : "下载正文并加入书架"}</button></article>` : ""}
-    <div class="result-list" id="result-list">${onlineSearch.results.map((item, index) => resultCard(item, index, busy)).join("")}</div>
+    ${preview ? `<article class="online-preview"><span class="source-tag">正文预览 · ${escapeHTML(preview.sourceName)}</span><h2>${escapeHTML(preview.title)}</h2><p class="subtle">${escapeHTML(preview.author)} · ${preview.chapterCount ? `${preview.chapterCount} 条目录` : "单篇作品"}</p><p class="online-preview-text">${escapeHTML(preview.first.text.slice(0, 420))}${preview.first.text.length > 420 ? "…" : ""}</p><details class="source-information"><summary>来源与版本说明</summary><p class="source-credit">${escapeHTML(preview.sourceNotice || "来源说明见原文页面")}</p><a href="${escapeHTML(safeSourceUrl(preview.sourceUrl))}" target="_blank" rel="noopener noreferrer">查看原站</a></details><p class="cache-note">${preview.readingMode === "online" ? "先保存首章，其他章节随读缓存。" : "下载成功后，可以离线阅读。"}</p>${onlineSearch.phase === "downloading" ? `<p id="online-progress" class="online-status" role="status">${progress ? `已获取 ${progress.done} 章 · ${escapeHTML(progress.title)}` : "正在准备下载…"}</p>` : ""}${onlineSearch.phase === "saving" ? '<p role="status">正在保存…</p>' : ""}<button class="primary-button" data-online-action="download" ${busy ? "disabled" : ""}>放入书架 ${uiIcon("plus",17)}</button></article>` : ""}
+    <div class="result-list" id="result-list">${groupOnlineResults(onlineSearch.results, onlineSearch.query).map(group => resultGroupCard(group, busy)).join("")}</div>
+    <details class="source-information search-source-note"><summary>关于书源</summary><p>自动查询已接入的免费渠道，不是全网检索。同名不同作者分别展示。第三方转载来源的授权未核实；免费不等于已获版权授权。可在预览中查看来源、版本和读取范围。</p></details>
   `, "search");
 }
 
-function resultCard(item, index, busy) {
-  return `<article class="result-card"><div class="result-cover">${escapeHTML(item.title.slice(0, 6))}</div><div><div class="result-title">${escapeHTML(item.title)}</div><div class="result-meta">${escapeHTML(item.snippet.slice(0, 90))}</div><span class="source-tag">中文维基文库 · ${item.title.includes("消歧") ? "同名索引" : "文字版本待预览"}</span></div><button class="add-button" data-online-preview="${index}" ${busy ? "disabled" : ""}>预览</button></article>`;
+function groupOnlineResults(items, query = "") {
+  const normalize = value => String(value || "").normalize("NFKC").replace(/[\s\p{P}]/gu, "").toLowerCase();
+  const groups = new Map(), seen = new Set();
+  items.forEach((item, index) => {
+    const identity = `${item.sourceId}/${item.id}`; if (seen.has(identity)) return; seen.add(identity);
+    const author = normalize(item.author), uncertain = !author || /未知|不详|待|作者见/.test(author);
+    const key = `${normalize(item.title)}|${author}${uncertain ? `|${identity}` : ""}`;
+    if (!groups.has(key)) groups.set(key, { title: item.title, author: item.author, channels: [] });
+    groups.get(key).channels.push({ item, index });
+  });
+  return [...groups.values()].sort((a, b) => Number(normalize(b.title) === normalize(query)) - Number(normalize(a.title) === normalize(query)));
+}
+function resultGroupCard(group, busy) {
+  return `<article class="book-result-group"><div class="book-result-heading"><div class="result-cover">${escapeHTML(group.title.slice(0, 6))}</div><div><h2>${escapeHTML(group.title)}</h2><p class="result-meta">${escapeHTML(group.author)}</p><span class="source-tag">${group.channels.length} 个免费渠道</span></div></div><div class="book-result-channels">${group.channels.map(({item,index}) => `<div class="book-result-channel"><div><strong>${escapeHTML(item.sourceName)}</strong><small>${escapeHTML(item.accessLabel || "免费渠道 · 正文待核验")}</small></div><button class="add-button" data-online-preview="${index}" ${busy ? "disabled" : ""}>预览 ${uiIcon("arrow",13)}</button></div>`).join("")}</div></article>`;
 }
 
 function settingsScreen() {
   const themeName = { bamboo: "竹影绿", paper: "纸本白", night: "松烟夜" }[settings.theme];
   return shell(`
-    <header class="topbar"><div class="brand"><span class="brand-mark">清</span>我的</div><button class="icon-button" data-nav="shelf" aria-label="回到书架">⌂</button></header>
-    <h1>安静地读</h1><p class="subtle">不登录、不上传书架和阅读记录；它们只保存在这台设备的浏览器中。</p>
+    <header class="topbar"><div class="brand wordmark">清如许<span>私人书房</span></div></header>
+    <div class="page-heading"><h1>我的</h1><span>按自己的习惯读</span></div><p class="privacy-note">书架和阅读记录，只留在这台设备。</p>
     <div class="settings-group">
       <article class="settings-card"><h3>阅读主题</h3><p>当前：${themeName}</p><div class="theme-options"><button class="theme-choice ${settings.theme === "bamboo" ? "selected" : ""}" data-theme="bamboo" aria-label="竹影绿"></button><button class="theme-choice ${settings.theme === "paper" ? "selected" : ""}" data-theme="paper" aria-label="纸本白"></button><button class="theme-choice ${settings.theme === "night" ? "selected" : ""}" data-theme="night" aria-label="松烟夜"></button></div></article>
       <article class="settings-card"><h3>阅读方式</h3><p>默认左右翻页。点击阅读页中央可打开目录、书签和字号调整。</p></article>
       <article class="settings-card"><h3>本地导入</h3><p>支持 UTF-8、GB18030、UTF-16 TXT；会在浏览器本地保存副本，不会移动或删除原文件。EPUB 阅读将在原生 App 阶段支持。</p><button class="primary-button" data-action="import">导入 TXT</button></article>
       <article class="settings-card backup-card"><h3>书架备份</h3><p>把小说、进度、书签和阅读设置保存成一个本地文件。恢复时会安全合并，不清空现有书架。</p><span class="backup-summary">当前 ${library.length} 本书 · 不需要账号</span><div class="backup-actions"><button class="secondary-button" data-backup-action="choose">恢复备份</button><button class="primary-button" data-backup-action="export">导出备份</button></div></article>
-      <article class="settings-card"><h3>清如许 v34</h3><p>找书已接入中文维基文库，可预览和下载文字正文。主要覆盖古典小说与公版作品，尚未接入现代网文平台。</p></article>
+      <article class="settings-card"><h3>清如许 v36.6.1</h3><p>没有内置示例书，只留下你自己的藏书。本次同步界面与本地阅读器；手机端书源后台尚未连接。</p></article>
     </div>
   `, "settings");
 }
@@ -760,7 +767,7 @@ function chapterSheet(book) {
   const chapterEntries = book.chapters.map((chapter, index) => ({ chapter, index }));
   if (descending) chapterEntries.reverse();
   const content = showingBookmarks ? bookmarkPanel(book, bookmarks) : `<div class="chapter-search"><span aria-hidden="true">⌕</span><input id="chapter-search" value="${escapeHTML(query)}" placeholder="搜索章节" autocomplete="off" enterkeyhint="search" /></div><div class="chapter-directory-meta"><span id="chapter-result-meta">共 ${book.chapters.length} 章 · 当前第 ${reader.chapter + 1} 章</span><button data-reader-action="toggle-chapter-order" aria-label="切换目录顺序">${descending ? "倒序 ↓" : "正序 ↑"}</button></div><p class="chapter-search-empty" id="chapter-search-empty" hidden>没有匹配的章节</p><div class="chapter-list" id="chapter-list">${chapterEntries.map(({ chapter, index }) => `<button class="${index === reader.chapter ? "active" : ""}" data-chapter="${index}"><span>${escapeHTML(chapter.title)}</span>${index === reader.chapter ? `<em>正在读</em>` : ""}</button>`).join("")}</div>`;
-  return `<aside class="sheet" id="chapter-sheet" ${reader.sheetOpen ? "" : "hidden"}><button class="sheet-backdrop" data-reader-action="close-chapters" aria-label="关闭目录并返回阅读"></button><div class="sheet-content"><div class="sheet-handle"></div><div class="sheet-head"><div><h2>${escapeHTML(book.title)}</h2><p class="subtle">目录与书签 ${safeSourceUrl(book.sourceUrl) ? `<a href="${escapeHTML(safeSourceUrl(book.sourceUrl))}" target="_blank" rel="noopener noreferrer">原文与署名</a>` : ""}</p></div><button class="close" data-reader-action="close-chapters" aria-label="关闭目录">×</button></div><div class="chapter-tabs"><button class="${showingBookmarks ? "" : "active"}" data-reader-action="show-chapters">目录</button><button class="${showingBookmarks ? "active" : ""}" data-reader-action="show-bookmarks">书签${bookmarks.length ? ` (${bookmarks.length})` : ""}</button></div>${content}</div></aside>`;
+  return `<aside class="sheet" id="chapter-sheet" ${reader.sheetOpen ? "" : "hidden"}><button class="sheet-backdrop" data-reader-action="close-chapters" aria-label="关闭目录并返回阅读"></button><div class="sheet-content"><div class="sheet-handle"></div><div class="sheet-head"><div><h2>${escapeHTML(book.title)}</h2><p class="subtle">目录与书签 ${safeSourceUrl(book.sourceUrl) ? `<a href="${escapeHTML(safeSourceUrl(book.sourceUrl))}" target="_blank" rel="noopener noreferrer">原文与署名</a>` : ""}</p>${book.sourceNotice ? `<details class="source-credits"><summary>作者、来源与许可</summary><p>${escapeHTML(book.sourceNotice)}</p>${safeSourceUrl(book.sourceLicenseUrl) ? `<a href="${escapeHTML(safeSourceUrl(book.sourceLicenseUrl))}" target="_blank" rel="noopener noreferrer">查看许可</a>` : ""}</details>` : ""}</div><button class="close" data-reader-action="close-chapters" aria-label="关闭目录">×</button></div><div class="chapter-tabs"><button class="${showingBookmarks ? "" : "active"}" data-reader-action="show-chapters">目录</button><button class="${showingBookmarks ? "active" : ""}" data-reader-action="show-bookmarks">书签${bookmarks.length ? ` (${bookmarks.length})` : ""}</button></div>${content}</div></aside>`;
 }
 
 function getBookBookmarks(book) {
@@ -950,6 +957,7 @@ function bookmarkMatchesCurrentPosition(book, bookmark, currentOffset) {
 }
 
 function calculateReadingProgress(book, chapterIndex, page, pages) {
+  if (isOnlineBook(book)) return clamp((chapterIndex + (page + 1) / Math.max(1, pages.length)) / book.chapters.length, 0, 1);
   const totalLength = Math.max(1, book.chapters.reduce((sum, chapter) => sum + chapter.text.length, 0));
   const before = book.chapters.slice(0, chapterIndex).reduce((sum, chapter) => sum + chapter.text.length, 0);
   const chapter = book.chapters[chapterIndex];
@@ -960,7 +968,7 @@ function calculateReadingProgress(book, chapterIndex, page, pages) {
 }
 
 function bindEvents() {
-  document.querySelectorAll("[data-nav]").forEach((el) => el.addEventListener("click", () => { view = el.dataset.nav; render(); }));
+  document.querySelectorAll("[data-nav]").forEach((el) => el.addEventListener("click", () => { cancelRemoteChapterRead(); view = el.dataset.nav; render(); }));
   document.querySelectorAll("[data-open-book]:not(.book-card)").forEach((el) => el.addEventListener("click", () => openBook(el.dataset.openBook)));
   document.querySelectorAll(".book-card[data-open-book]").forEach(bindBookCardGesture);
   const shelfSearch = document.querySelector("#shelf-query");
@@ -1280,10 +1288,44 @@ async function cleanBookPromotions(bookId) {
   showToast(`已清理 ${blocks} 处推广或导流信息`);
 }
 
-function openBook(id) {
+function isOnlineBook(book) { return ["tadu", "zongheng", "sudugu", "bqquge"].includes(book?.remoteSource) && /^\d{1,10}$/.test(book.remoteBookId || ""); }
+
+function cancelRemoteChapterRead() {
+  remoteReadRequest.sequence += 1;
+  remoteReadRequest.controller?.abort();
+  remoteReadRequest.controller = null;
+}
+
+async function ensureReadableChapter(book, chapterIndex) {
+  cancelRemoteChapterRead();
+  const chapter = book?.chapters?.[chapterIndex];
+  if (!chapter) return false;
+  if (chapter.text?.trim() || !isOnlineBook(book)) return true;
+  if (!navigator.onLine) { showToast("这一章尚未缓存，请联网后再读；当前位置已保留"); return false; }
+  const sequence = remoteReadRequest.sequence;
+  const controller = new AbortController();
+  remoteReadRequest.controller = controller;
+  showToast("正在读取这一章…");
+  try {
+    const loaded = await QrxSources.chapter(book, chapter, controller.signal);
+    if (sequence !== remoteReadRequest.sequence || !library.includes(book)) return false;
+    chapter.text = loaded.text;
+    const saved = await persist();
+    if (!saved) { chapter.text = ""; showToast("本章缓存未保存，请检查存储空间；当前位置已保留"); return false; }
+    if (sequence !== remoteReadRequest.sequence) return false;
+    showToast("本章已缓存，可以离线重读");
+    return true;
+  } catch (error) {
+    if (!controller.signal.aborted && sequence === remoteReadRequest.sequence) showToast(error?.message || "这一章暂时无法读取，当前位置已保留");
+    return false;
+  } finally { if (sequence === remoteReadRequest.sequence) remoteReadRequest.controller = null; }
+}
+
+async function openBook(id) {
   const book = library.find((item) => item.id === id);
   if (!book) return;
   const location = resolveReadingPage(book, book.readingPosition);
+  if (!(await ensureReadableChapter(book, location.chapter))) return;
   const chapter = book.chapters[location.chapter];
   const pages = paginate(chapter.text, settings.fontSize);
   const savedOffset = book.readingPosition?.charOffset;
@@ -1294,7 +1336,7 @@ function openBook(id) {
 }
 
 function readerAction(action) {
-  if (action === "back") { updateProgress(true); view = "shelf"; render(); return; }
+  if (action === "back") { cancelRemoteChapterRead(); updateProgress(true); view = "shelf"; render(); return; }
   if (action === "chapters") { reader.sheetOpen = true; reader.sheetTab = "chapters"; reader.chapterQuery = ""; reader.menuOpen = false; reader.settingsOpen = false; render(); return; }
   if (action === "close-chapters") { reader.sheetOpen = false; reader.chapterQuery = ""; reader.menuOpen = true; render(); return; }
   if (action === "show-chapters") { reader.sheetTab = "chapters"; render(); return; }
@@ -1316,30 +1358,33 @@ function readerAction(action) {
   if (action === "prev") { previousPage(); return; }
 }
 
-function nextPage() {
+async function nextPage() {
+  cancelRemoteChapterRead();
   const book = currentBook();
   const pages = paginate(book.chapters[reader.chapter].text, settings.fontSize);
   if (reader.page < pages.length - 1) reader.page += 1;
-  else if (reader.chapter < book.chapters.length - 1) { reader.chapter += 1; reader.page = 0; }
+  else if (reader.chapter < book.chapters.length - 1) { if (!(await ensureReadableChapter(book, reader.chapter + 1))) return; reader.chapter += 1; reader.page = 0; }
   else { showToast("已经读到本书结尾"); return; }
   reader.transitionDirection = "next";
   setReaderAnchorFromPage(book);
   reader.menuOpen = false; reader.settingsOpen = false; updateProgress(); render();
 }
 
-function previousPage() {
+async function previousPage() {
+  cancelRemoteChapterRead();
   const book = currentBook();
   if (reader.page > 0) reader.page -= 1;
-  else if (reader.chapter > 0) { reader.chapter -= 1; reader.page = paginate(book.chapters[reader.chapter].text, settings.fontSize).length - 1; }
+  else if (reader.chapter > 0) { if (!(await ensureReadableChapter(book, reader.chapter - 1))) return; reader.chapter -= 1; reader.page = paginate(book.chapters[reader.chapter].text, settings.fontSize).length - 1; }
   else { reader.menuOpen = false; render(); return; }
   reader.transitionDirection = "previous";
   setReaderAnchorFromPage(book);
   reader.menuOpen = false; reader.settingsOpen = false; updateProgress(); render();
 }
 
-function previousChapter() {
+async function previousChapter() {
   if (reader.chapter === 0) { showToast("已经是第一章"); return; }
   const book = currentBook();
+  if (!(await ensureReadableChapter(book, reader.chapter - 1))) return;
   reader.chapter -= 1;
   reader.page = paginate(book.chapters[reader.chapter].text, settings.fontSize).length - 1;
   reader.transitionDirection = "previous";
@@ -1348,9 +1393,10 @@ function previousChapter() {
   render();
 }
 
-function nextChapter() {
+async function nextChapter() {
   const book = currentBook();
   if (reader.chapter >= book.chapters.length - 1) { showToast("已经是最后一章"); return; }
+  if (!(await ensureReadableChapter(book, reader.chapter + 1))) return;
   reader.chapter += 1;
   reader.page = 0;
   reader.transitionDirection = "next";
@@ -1359,9 +1405,10 @@ function nextChapter() {
   render();
 }
 
-function goToChapter(chapterIndex) {
+async function goToChapter(chapterIndex) {
   const book = currentBook();
   if (!book) return;
+  if (!(await ensureReadableChapter(book, clamp(chapterIndex, 0, book.chapters.length - 1)))) return;
   reader.chapter = clamp(chapterIndex, 0, Math.max(0, book.chapters.length - 1));
   reader.page = 0;
   setReaderAnchorFromPage(book);
@@ -1417,10 +1464,11 @@ function toggleBookmark() {
   showToast("已加入书签");
 }
 
-function goToBookmark(bookmarkId) {
+async function goToBookmark(bookmarkId) {
   const book = currentBook();
   const bookmark = book?.bookmarks?.find((item) => item.id === bookmarkId);
   if (!book || !bookmark) return;
+  if (!(await ensureReadableChapter(book, clamp(bookmark.chapter, 0, book.chapters.length - 1)))) return;
   const location = resolveReadingPage(book, bookmark);
   reader.chapter = location.chapter;
   reader.page = location.page;
@@ -1567,12 +1615,14 @@ async function runOnlineSearch(value) {
   const task = beginOnlineTask("searching");
   onlineSearch.query = query;
   onlineSearch.results = [];
+  onlineSearch.outcomes = [];
   onlineSearch.preview = null;
   refreshOnlineSearch();
   try {
-    const results = await QrxSources.search(query, task.signal);
+    const data = await QrxSources.search(query, task.signal);
     if (task.id !== onlineSearch.task) return;
-    onlineSearch.results = results;
+    onlineSearch.results = data.results;
+    onlineSearch.outcomes = data.outcomes;
     onlineSearch.phase = "results";
     refreshOnlineSearch();
   } catch (error) { onlineFailure(error, task); }
@@ -1586,7 +1636,7 @@ async function previewOnlineBook(index) {
   onlineSearch.preview = null;
   refreshOnlineSearch();
   try {
-    const preview = await QrxSources.prepare(item.title, task.signal);
+    const preview = await QrxSources.prepare(item, task.signal);
     if (task.id !== onlineSearch.task) return;
     onlineSearch.preview = preview;
     onlineSearch.phase = "preview";
@@ -1630,7 +1680,7 @@ async function downloadOnlineBook() {
     onlineSearch.savedId = book.id;
     onlineSearch.phase = "success";
     onlineSearch.preview = null;
-    showToast(`已保存 ${book.chapters.length} 章，可以离线阅读`);
+    showToast(isOnlineBook(book) ? "已放入书架，其他章节随读缓存" : `已保存 ${book.chapters.length} 章，可以离线阅读`);
     render();
   } catch (error) { onlineFailure(error, task); }
 }
@@ -1638,7 +1688,7 @@ async function downloadOnlineBook() {
 function safeSourceUrl(value) {
   try {
     const url = new URL(String(value || ""));
-    return url.protocol === "https:" && url.hostname === "zh.wikisource.org" && !url.username && !url.password ? url.href : "";
+    return url.protocol === "https:" && ["zh.wikisource.org", "scp-wiki-cn.wikidot.com", "creativecommons.org", "www.gutenberg.org", "www.tadu.com", "www.zongheng.com", "read.zongheng.com", "www.suduguu.com", "www.bqquge.org"].includes(url.hostname) && !url.username && !url.password && !url.port ? url.href : "";
   } catch { return ""; }
 }
 
@@ -1699,7 +1749,7 @@ function sanitizeBackupBook(value, index) {
   if (!value || typeof value !== "object" || !Array.isArray(value.chapters) || !value.chapters.length) throw createBackupError("backup-content", `第 ${index + 1} 本书缺少章节。`);
   const chapters = value.chapters.map((chapter, chapterIndex) => {
     if (!chapter || typeof chapter !== "object" || typeof chapter.text !== "string") throw createBackupError("backup-content", `第 ${index + 1} 本书的第 ${chapterIndex + 1} 章内容损坏。`);
-    return { title: String(chapter.title || `第 ${chapterIndex + 1} 章`).slice(0, 120), text: chapter.text, sourceUrl: safeSourceUrl(chapter.sourceUrl), sourceRevision: Math.max(0, Number(chapter.sourceRevision) || 0) };
+    return { title: String(chapter.title || `第 ${chapterIndex + 1} 章`).slice(0, 120), text: chapter.text, sourceUrl: safeSourceUrl(chapter.sourceUrl), sourceRevision: Math.max(0, Number(chapter.sourceRevision) || 0), sourceChapterId: /^\d{1,20}$/.test(chapter.sourceChapterId || "") ? String(chapter.sourceChapterId) : undefined };
   });
   const sourceId = String(value.id || "");
   const id = /^[a-z0-9][a-z0-9_-]{0,159}$/i.test(sourceId) ? sourceId : newLocalBookId();
@@ -1725,6 +1775,8 @@ function sanitizeBackupBook(value, index) {
     sourceUrl: safeSourceUrl(value.sourceUrl),
     sourceNotice: String(value.sourceNotice || "").slice(0, 8000),
     sourceLicenseUrl: safeSourceUrl(value.sourceLicenseUrl),
+    remoteSource: ["tadu", "zongheng", "sudugu", "bqquge"].includes(value.remoteSource) && /^\d{1,10}$/.test(value.remoteBookId || "") ? value.remoteSource : undefined,
+    remoteBookId: ["tadu", "zongheng", "sudugu", "bqquge"].includes(value.remoteSource) && /^\d{1,10}$/.test(value.remoteBookId || "") ? String(value.remoteBookId) : undefined,
     progress: clamp(Number(value.progress) || 0, 0, 1),
     contentFingerprint: String(value.contentFingerprint || "").slice(0, 220),
     importedAt: Math.max(0, Number(value.importedAt) || 0),
