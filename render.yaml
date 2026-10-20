@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: qingruxu-source
+    runtime: node
+    plan: free
+    rootDir: cloud-source-service
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: QRX_ALLOWED_ORIGIN
+        value: https://tearsofmine.github.io
+      - key: QRX_API_TOKEN
+        generateValue: true
