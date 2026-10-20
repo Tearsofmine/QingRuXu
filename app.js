@@ -1,3 +1,4 @@
+const sourceConnection = { busy:false, message:"", error:false };
 const STORAGE_KEY = "qingruxu-library-v1";
 const SETTINGS_KEY = "qingruxu-settings-v1";
 const LIBRARY_DB_NAME = "qingruxu-library-db";
@@ -611,12 +612,7 @@ function emptyShelf() {
 }
 
 function searchScreen() {
-  if (globalThis.QrxSources?.available === false) return shell(`
-    <header class="topbar"><div class="brand wordmark">清如许<span>私人书房</span></div><button class="text-button" data-action="import">${uiIcon("upload",17)}导入</button></header>
-    <div class="page-heading"><h1>找书</h1><span>遇见下一段故事</span></div>
-    <div class="search-idle">${uiIcon("book",46)}<h2>先把喜欢的故事带进来</h2><p>手机端书源后台尚未连接。<br>现在可以导入 TXT，继续安心阅读。</p><button class="primary-button" data-action="import">导入小说</button></div>
-    <details class="source-information search-source-note"><summary>为什么手机端暂时不能找书？</summary><p>GitHub Pages 只托管网页，不能运行书源后台。电脑本地服务不会自动同步到手机；后续需部署可访问的 HTTPS 后台。已导入的小说和已缓存章节不受影响。</p></details>
-  `, "search");
+  if (!QrxSources.available) return shell(`<header class="topbar"><div class="brand wordmark">清如许<span>私人书房</span></div><button class="text-button" data-action="import">导入</button></header><div class="page-heading"><h1>找书</h1><span>遇见下一段故事</span></div><div class="search-idle">${uiIcon("book",46)}<h2>连接自己的书源</h2><p>云端后台已经准备好。<br>先在“我的”中填写私人访问密钥。</p><button class="primary-button" data-nav="settings">连接私人书源</button><p>本地导入的小说，随时都能读。</p></div>`, "search");
   const busy = ["searching", "previewing", "downloading", "saving"].includes(onlineSearch.phase);
   const preview = onlineSearch.preview;
   const progress = onlineSearch.progress;
@@ -657,17 +653,39 @@ function resultGroupCard(group, busy) {
   return `<article class="book-result-group"><div class="book-result-heading"><div class="result-cover">${escapeHTML(group.title.slice(0, 6))}</div><div><h2>${escapeHTML(group.title)}</h2><p class="result-meta">${escapeHTML(group.author)}</p><span class="source-tag">${group.channels.length} 个免费渠道</span></div></div><div class="book-result-channels">${group.channels.map(({item,index}) => `<div class="book-result-channel"><div><strong>${escapeHTML(item.sourceName)}</strong><small>${escapeHTML(item.accessLabel || "免费渠道 · 正文待核验")}</small></div><button class="add-button" data-online-preview="${index}" ${busy ? "disabled" : ""}>预览 ${uiIcon("arrow",13)}</button></div>`).join("")}</div></article>`;
 }
 
+
+function privateSourceCard() {
+  const config = QrxSources.configuration();
+  return `<article class="settings-card private-source-card"><h3>私人书源</h3><p>${config.configured ? '已保存此设备的连接密钥，可以前往找书。' : '连接自己的云端后台，电脑关机后也能找书。'}</p><span class="source-endpoint">${escapeHTML(config.url)}</span><form id="source-connect-form"><label for="source-private-key">访问密钥</label><input id="source-private-key" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" maxlength="256" placeholder="${config.configured ? '已保存；留空可测试连接' : '粘贴 Render 的 QRX_API_TOKEN'}" ${sourceConnection.busy ? 'disabled' : ''} /><p class="source-key-note">只保存在这台设备，不随书架备份导出。请勿分享密钥或包含密钥的截图。</p><button class="primary-button" ${sourceConnection.busy ? 'disabled' : ''}>${sourceConnection.busy ? '正在连接…' : config.configured ? '测试 / 更新连接' : '连接并保存'}</button></form>${sourceConnection.message ? `<p class="${sourceConnection.error ? 'online-error' : 'online-status'}" role="status">${escapeHTML(sourceConnection.message)}</p>` : ''}${config.configured ? '<div class="source-link-actions"><button class="text-button" data-nav="search">去找书 →</button><button class="text-button" data-forget-source>清除此设备密钥</button></div>' : ''}<details class="source-information"><summary>密钥在哪里？</summary><p>在 Render 的 Environment 页面复制 QRX_API_TOKEN 的值。免费后台休眠后，首次连接可能需要约一分钟。清除此设备密钥不会删除书籍，也不会撤销后台密钥；如需撤销，请到 Render 更换密钥。</p></details></article>`;
+}
+async function connectPrivateSource() {
+  if (sourceConnection.busy) return;
+  const input = document.querySelector('#source-private-key');
+  const value = input?.value || ''; if (input) input.value = '';
+  sourceConnection.busy = true; sourceConnection.error = false;
+  sourceConnection.message = '正在验证连接；免费后台可能正在唤醒，请稍等。'; render();
+  try { const result = await QrxSources.connect(value); sourceConnection.message = `连接成功，已接入 ${result.count} 个免费渠道。`; }
+  catch (error) { sourceConnection.error = true; sourceConnection.message = error?.message || '连接没有成功，请稍后重试'; }
+  finally { sourceConnection.busy = false; render(); }
+}
+function forgetPrivateSource() {
+  try { QrxSources.forget(); onlineSearch.controller?.abort(); onlineSearch.task++; onlineSearch.phase = 'idle'; onlineSearch.results = []; onlineSearch.outcomes = []; onlineSearch.preview = null; sourceConnection.error = false; sourceConnection.message = '已清除此设备密钥，书籍、书签和进度没有改变。'; }
+  catch { sourceConnection.error = true; sourceConnection.message = '浏览器暂时无法清除密钥，请稍后重试。'; }
+  render();
+}
+
 function settingsScreen() {
   const themeName = { bamboo: "竹影绿", paper: "纸本白", night: "松烟夜" }[settings.theme];
   return shell(`
     <header class="topbar"><div class="brand wordmark">清如许<span>私人书房</span></div></header>
     <div class="page-heading"><h1>我的</h1><span>按自己的习惯读</span></div><p class="privacy-note">书架和阅读记录，只留在这台设备。</p>
     <div class="settings-group">
+      ${privateSourceCard()}
       <article class="settings-card"><h3>阅读主题</h3><p>当前：${themeName}</p><div class="theme-options"><button class="theme-choice ${settings.theme === "bamboo" ? "selected" : ""}" data-theme="bamboo" aria-label="竹影绿"></button><button class="theme-choice ${settings.theme === "paper" ? "selected" : ""}" data-theme="paper" aria-label="纸本白"></button><button class="theme-choice ${settings.theme === "night" ? "selected" : ""}" data-theme="night" aria-label="松烟夜"></button></div></article>
       <article class="settings-card"><h3>阅读方式</h3><p>默认左右翻页。点击阅读页中央可打开目录、书签和字号调整。</p></article>
       <article class="settings-card"><h3>本地导入</h3><p>支持 UTF-8、GB18030、UTF-16 TXT；会在浏览器本地保存副本，不会移动或删除原文件。EPUB 阅读将在原生 App 阶段支持。</p><button class="primary-button" data-action="import">导入 TXT</button></article>
       <article class="settings-card backup-card"><h3>书架备份</h3><p>把小说、进度、书签和阅读设置保存成一个本地文件。恢复时会安全合并，不清空现有书架。</p><span class="backup-summary">当前 ${library.length} 本书 · 不需要账号</span><div class="backup-actions"><button class="secondary-button" data-backup-action="choose">恢复备份</button><button class="primary-button" data-backup-action="export">导出备份</button></div></article>
-      <article class="settings-card"><h3>清如许 v36.6.1</h3><p>没有内置示例书，只留下你自己的藏书。本次同步界面与本地阅读器；手机端书源后台尚未连接。</p></article>
+      <article class="settings-card"><h3>清如许 v36.7</h3><p>没有内置示例书，只留下你自己的藏书。搜索后选择免费渠道，已读章节随读缓存。</p></article>
     </div>
   `, "settings");
 }
@@ -968,6 +986,8 @@ function calculateReadingProgress(book, chapterIndex, page, pages) {
 }
 
 function bindEvents() {
+  document.querySelector('#source-connect-form')?.addEventListener('submit', event => { event.preventDefault(); void connectPrivateSource(); });
+  document.querySelector('[data-forget-source]')?.addEventListener('click', forgetPrivateSource);
   document.querySelectorAll("[data-nav]").forEach((el) => el.addEventListener("click", () => { cancelRemoteChapterRead(); view = el.dataset.nav; render(); }));
   document.querySelectorAll("[data-open-book]:not(.book-card)").forEach((el) => el.addEventListener("click", () => openBook(el.dataset.openBook)));
   document.querySelectorAll(".book-card[data-open-book]").forEach(bindBookCardGesture);
