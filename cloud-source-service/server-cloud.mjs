@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createServer } from './server.mjs';
 
-const routes = new Set(['/qrx-api/sources', '/qrx-api/search', '/qrx-api/preview', '/qrx-api/download', '/qrx-api/chapter']);
+const routes = new Set(['/qrx-api/sources', '/qrx-api/search', '/qrx-api/preview', '/qrx-api/download', '/qrx-api/chapter', '/qrx-api/catalog']);
 const allowedHeaders = new Set(['authorization', 'x-qrx-client']);
 const digest = value => createHash('sha256').update(value).digest();
 function json(res, status, value) {
@@ -33,7 +33,7 @@ export async function createCloudServer({ token, allowedOrigin, sources } = {}) 
     let url;
     try { url = new URL(req.url, 'http://gateway.invalid'); } catch { return json(res, 400, { error: '请求地址无效' }); }
     // No secrets, source metadata, user content, or external requests in health.
-    if ((url.pathname === '/' || url.pathname === '/health') && req.method === 'GET') return json(res, 200, { ok: true, service: 'qingruxu-source', version: '36.7' });
+    if ((url.pathname === '/' || url.pathname === '/health') && req.method === 'GET') return json(res, 200, { ok: true, service: 'qingruxu-source', version: '36.8' });
     if (!routes.has(url.pathname)) return json(res, 404, { error: '没有这个接口' });
     const requestOrigin = req.headers.origin;
     if (requestOrigin && requestOrigin !== allowedOrigin) return json(res, 403, { error: '不接受此网页来源' });

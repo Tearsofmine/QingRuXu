@@ -60,6 +60,11 @@ export function createServer({sources=createSources(),webRoot=defaults}={}) {
         const previewId=randomUUID();previews.set(previewId,{source,preview,expires:Date.now()+10*60000});
         return send(res,200,{previewId,sourceId:source.id,sourceName:source.name,title:preview.title,author:preview.author,sourceUrl:preview.sourceUrl,sourceNotice:preview.sourceNotice||preview.notice||'',sourceLicenseUrl:preview.sourceLicenseUrl||'',accessLabel:preview.accessLabel||'',chapterCount:preview.chapters?.length,readingMode:preview.remoteSource?'online':'download',first:{text:preview.first.text.slice(0,600)},root:{children:preview.root.children}});
       }
+      if(url.pathname==='/qrx-api/catalog') {
+        const source=providers.get(url.searchParams.get('source')),book=url.searchParams.get('book');
+        if(!source?.catalog||source.freeOnly!==true||source.searchable===false||!/^\d{1,10}$/.test(book||''))return send(res,400,{error:'此来源暂不支持检查目录更新'});
+        const result=await source.catalog(book,signal);signal.throwIfAborted();return send(res,200,result);
+      }
       if(url.pathname==='/qrx-api/chapter') {
         const source=providers.get(url.searchParams.get('source'));const book=url.searchParams.get('book'),chapter=url.searchParams.get('chapter');
         if(!source?.readChapter||!book||!chapter)return send(res,400,{error:'来源或章节标识无效'});

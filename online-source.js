@@ -45,6 +45,7 @@ globalThis.QrxSources = (() => {
   const list = async signal => validateSources(await json('sources',signal));
   const search = (q,signal) => json(`search?${new URLSearchParams({q})}`,signal);
   const prepare = (item,signal) => json(`preview?${new URLSearchParams({source:item.sourceId,id:item.id})}`,signal);
+  const catalog = (book,signal) => json(`catalog?${new URLSearchParams({source:book.remoteSource,book:book.remoteBookId})}`,signal);
   async function chapter(book,entry,signal) {
     const result = await json(`chapter?${new URLSearchParams({source:book.remoteSource,book:book.remoteBookId,chapter:entry.sourceChapterId})}`,signal);
     if(result.sourceChapterId !== entry.sourceChapterId || typeof result.text !== 'string' || !result.text.trim()) throw new Error('没有收到正确的章节正文，阅读位置已保留');
@@ -63,5 +64,5 @@ globalThis.QrxSources = (() => {
       return book;
     } finally { await reader.cancel().catch(()=>{}); }
   }
-  return { get available(){return Boolean(savedToken());},configuration,connect,forget,list,search,prepare,download,chapter };
+  return { get available(){return Boolean(savedToken());},configuration,connect,forget,list,search,prepare,download,chapter,catalog };
 })();

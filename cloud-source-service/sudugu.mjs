@@ -34,8 +34,8 @@ export function parseSuduguChapterPage(html,chapter,bookId,base=BASE,suffix='\\.
 }
 export function createSuduguSource(fetchPage=upstream){
  const directories=new Map(),texts=new Map();
- async function directory(bookId,signal){
-  if(!validId(bookId))throw new Error('作品标识无效');const cached=directories.get(bookId);if(cached&&Date.now()-cached.at<600000)return cached.book;
+  async function directory(bookId,signal,fresh=false){
+   if(!validId(bookId))throw new Error('作品标识无效');const cached=directories.get(bookId);if(!fresh&&cached&&Date.now()-cached.at<600000)return cached.book;
   const first=parseSuduguDirectoryPage(await(await fetchPage(`${BASE}/${bookId}/`,{signal})).text(),bookId);
   if(!first.title||!first.author)throw new Error('未取得作品名称及作者');
   const chapters=[...first.chapters],visited=new Set(),queue=[...first.pages];
@@ -52,6 +52,7 @@ export function createSuduguSource(fetchPage=upstream){
   const value={title:chapter.title,text,sourceChapterId:chapterId,sourceUrl:chapter.sourceUrl};if(texts.size>=24)texts.delete(texts.keys().next().value);texts.set(id,{value,at:Date.now()});return value;
  }
  return{id:'sudugu',name:'速读谷',freeOnly:true,description:'第三方公开免费转载源，授权未核实；逐章读取，不执行原站广告脚本。',
+   async catalog(bookId,signal){const book=await directory(bookId,signal,true);return{...book,remoteSource:'sudugu',remoteBookId:bookId};},
   async search(query,signal){return parseSuduguSearch(await(await fetchPage(`${BASE}/i/sor.aspx?${new URLSearchParams({key:query})}`,{signal})).text(),query);},
   async prepare(bookId,signal){const book=await directory(bookId,signal),first=await readChapter(bookId,book.chapters[0].sourceChapterId,signal);await readChapter(bookId,book.chapters.at(-1).sourceChapterId,signal);return{...book,source:'速读谷',sourceUrl:`${BASE}/${bookId}/`,sourceNotice:`${book.author}《${book.title}》｜速读谷（第三方转载）\n公开网页无需付费；转载授权未核实，免费不等于已获版权授权。首章及当前末章正文和分页已核验，不保证逐章无缺漏或与原作同步。版权归作者及权利人。`,accessLabel:'首章及当前末章已核验 · 第三方转载',remoteSource:'sudugu',remoteBookId:bookId,first,root:{children:book.chapters.map(c=>c.title)}};},
   async download(preview,signal,onProgress){signal.throwIfAborted();const{first,root,...book}=preview;onProgress({done:1,total:book.chapters.length,title:'首章已保存，其余正文阅读时加载'});return{...book,chapters:book.chapters.map((c,i)=>({...c,text:i===0?first.text:''}))};},readChapter};

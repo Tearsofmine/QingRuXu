@@ -2,7 +2,7 @@ const sourceConnection = { busy:false, message:"", error:false };
 const STORAGE_KEY = "qingruxu-library-v1";
 const SETTINGS_KEY = "qingruxu-settings-v1";
 const LIBRARY_DB_NAME = "qingruxu-library-db";
-const LIBRARY_DB_VERSION = 2;
+const LIBRARY_DB_VERSION = 3;
 const LIBRARY_RECORD_KEY = "library";
 const BOOK_ORDER_KEY = "book-order";
 const IMPORT_MAX_BYTES = 100 * 1024 * 1024;
@@ -67,113 +67,12 @@ function loadSettings() {
   catch { return defaults; }
 }
 
-function openLibraryDatabase() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(LIBRARY_DB_NAME, LIBRARY_DB_VERSION);
-    request.onerror = () => reject(request.error);
-    request.onblocked = () => reject(createImportError("database-blocked"));
-    request.onupgradeneeded = () => {
-      const database = request.result;
-      if (!database.objectStoreNames.contains("records")) database.createObjectStore("records");
-      if (!database.objectStoreNames.contains("books")) database.createObjectStore("books", { keyPath: "id" });
-      if (!database.objectStoreNames.contains("meta")) database.createObjectStore("meta");
-    };
-    request.onsuccess = () => {
-      request.result.onversionchange = () => request.result.close();
-      resolve(request.result);
-    };
-  });
-}
+function readLibraryFromDatabase(options = {}) { return QrxLibrary.load({ legacyBooks: loadLibrary(), adopt: Boolean(options.adopt) }); }
+function saveLibraryToDatabase(books, options = {}) { return QrxLibrary.save(books, options); }
+function persistSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); return true; } catch { return false; } }
+function persist(options = {}) { return QrxUpgrades.persist(options); }
+function hydrateLibrary() { return QrxUpgrades.hydrate(); }
 
-async function readLibraryFromDatabase() {
-  const database = await openLibraryDatabase();
-  try {
-    return await new Promise((resolve, reject) => {
-      const transaction = database.transaction(["books", "meta", "records"], "readonly");
-      const orderRequest = transaction.objectStore("meta").get(BOOK_ORDER_KEY);
-      const booksRequest = transaction.objectStore("books").getAll();
-      const legacyRequest = transaction.objectStore("records").get(LIBRARY_RECORD_KEY);
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error || new Error("database-aborted"));
-      transaction.oncomplete = () => {
-        const books = Array.isArray(booksRequest.result) ? booksRequest.result : [];
-        const order = Array.isArray(orderRequest.result) ? orderRequest.result : [];
-        const initialized = Array.isArray(orderRequest.result);
-        if (books.length || initialized) {
-          const positions = new Map(order.map((id, index) => [id, index]));
-          books.sort((left, right) => (positions.get(left.id) ?? Infinity) - (positions.get(right.id) ?? Infinity));
-          resolve({ books, migratedFromLegacy: false, initialized: true });
-          return;
-        }
-        const legacy = legacyRequest.result;
-        resolve({ books: Array.isArray(legacy) ? legacy : [], migratedFromLegacy: Array.isArray(legacy) && legacy.length > 0, initialized: Array.isArray(legacy) && legacy.length > 0 });
-      };
-    });
-  } finally {
-    database.close();
-  }
-}
-
-async function saveLibraryToDatabase(books) {
-  const database = await openLibraryDatabase();
-  try {
-    await new Promise((resolve, reject) => {
-      const transaction = database.transaction(["books", "meta", "records"], "readwrite");
-      const booksStore = transaction.objectStore("books");
-      const requestedIds = new Set(books.map((book) => book.id));
-      const existingKeys = booksStore.getAllKeys();
-      existingKeys.onsuccess = () => {
-        existingKeys.result.forEach((id) => {
-          if (!requestedIds.has(id)) booksStore.delete(id);
-        });
-        books.forEach((book) => booksStore.put(book));
-        transaction.objectStore("meta").put(books.map((book) => book.id), BOOK_ORDER_KEY);
-        transaction.objectStore("records").delete(LIBRARY_RECORD_KEY);
-      };
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error || new Error("database-aborted"));
-      transaction.oncomplete = () => resolve();
-    });
-  } finally {
-    database.close();
-  }
-  try { localStorage.removeItem(STORAGE_KEY); } catch { /* Legacy cache cleanup is optional. */ }
-}
-
-function persistSettings() {
-  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); return true; }
-  catch { return false; }
-}
-
-function persist() {
-  persistSettings();
-  const write = libraryWriteQueue.then(() => saveLibraryToDatabase(library));
-  // A later save must still be allowed after an earlier quota or browser error.
-  libraryWriteQueue = write.catch(() => {});
-  return write.then(() => true).catch(() => {
-    // Never report a successful large-book save when IndexedDB failed. An old
-    // localStorage snapshot is still read during migration, but new imports
-    // must either reach the database atomically or remain out of the shelf.
-    return false;
-  });
-}
-
-async function hydrateLibrary() {
-  try {
-    const saved = await readLibraryFromDatabase();
-    if (saved.initialized) {
-      library = withoutDemoBooks(saved.books);
-      if (saved.migratedFromLegacy || library.length !== saved.books.length) await persist();
-      render();
-      return;
-    }
-    await persist();
-  } catch {
-    // Older or private browser sessions keep using the small legacy cache.
-  } finally {
-    libraryReady = true;
-  }
-}
 
 function escapeHTML(value) {
   return String(value).replace(/[&<>'"]/g, (char) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "'":"&#39;", '"': "&quot;" }[char]));
@@ -193,7 +92,7 @@ function render() {
   else if (view === "search") content = searchScreen();
   else if (view === "settings") content = settingsScreen();
   else content = shelfScreen();
-  app.innerHTML = `${content}${importOverlay()}${shelfActionOverlay()}${backupOverlay()}`;
+  app.innerHTML = `${content}${importOverlay()}${shelfActionOverlay()}${backupOverlay()}${QrxUpgrades.notice()}`;
   document.body.classList.toggle("reader-active", view === "reader");
   if (transitionDirection && reader.transitionDirection === transitionDirection) reader.transitionDirection = "";
   bindEvents();
@@ -464,6 +363,7 @@ function shelfActionOverlay() {
     <section class="shelf-action-card"><div class="sheet-grab" aria-hidden="true"></div>
       <p class="shelf-action-kicker">书架管理</p><h2 id="shelf-action-title">${escapeHTML(title)}</h2>
       <p class="subtle">可修改书架显示、清理站外推广与导流，或将这本书移出书架；原始 TXT 不会受到影响。</p>
+      ${isOnlineBook(book) ? `<button class="shelf-edit-option" data-check-updates="${escapeHTML(book.id)}"><span>↻</span>检查新章节</button>` : ""}
       <button class="shelf-edit-option" data-shelf-action="edit"><span>✎</span>编辑书名与作者</button>
       <button class="shelf-cover-option" data-shelf-action="match-cover"><span>▧</span>网上匹配封面</button>
       <button class="shelf-generate-option" data-shelf-action="generate-cover"><span>◇</span>${book.coverStyle ? "换一款专属封面" : "生成专属封面"}</button>
@@ -685,7 +585,7 @@ function settingsScreen() {
       <article class="settings-card"><h3>阅读方式</h3><p>默认左右翻页。点击阅读页中央可打开目录、书签和字号调整。</p></article>
       <article class="settings-card"><h3>本地导入</h3><p>支持 UTF-8、GB18030、UTF-16 TXT；会在浏览器本地保存副本，不会移动或删除原文件。EPUB 阅读将在原生 App 阶段支持。</p><button class="primary-button" data-action="import">导入 TXT</button></article>
       <article class="settings-card backup-card"><h3>书架备份</h3><p>把小说、进度、书签和阅读设置保存成一个本地文件。恢复时会安全合并，不清空现有书架。</p><span class="backup-summary">当前 ${library.length} 本书 · 不需要账号</span><div class="backup-actions"><button class="secondary-button" data-backup-action="choose">恢复备份</button><button class="primary-button" data-backup-action="export">导出备份</button></div></article>
-      <article class="settings-card"><h3>清如许 v36.7</h3><p>没有内置示例书，只留下你自己的藏书。搜索后选择免费渠道，已读章节随读缓存。</p></article>
+      <article class="settings-card"><h3>清如许 v36.8</h3><p>没有内置示例书，只留下你自己的藏书。搜索后选择免费渠道，已读章节随读缓存。</p></article>
     </div>
   `, "settings");
 }
@@ -694,7 +594,7 @@ function readerScreen() {
   const book = currentBook();
   if (!book) { view = "shelf"; return shelfScreen(); }
   const chapter = book.chapters[reader.chapter] || book.chapters[0];
-  const pages = paginate(chapter.text, settings.fontSize);
+  const pages = paginate(chapter.text, settings.fontSize, chapter.title);
   reader.page = Math.max(0, Math.min(reader.page, pages.length - 1));
   const progress = Math.round(calculateReadingProgress(book, reader.chapter, reader.page, pages) * 100);
   const fontFamily = settings.fontFamily === "song" ? "Songti SC, STSong, serif" : "-apple-system, BlinkMacSystemFont, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif";
@@ -705,7 +605,7 @@ function readerScreen() {
   const isBookmarked = bookmarks.some((bookmark) => bookmarkMatchesCurrentPosition(book, bookmark, currentOffset));
   const bookmarkLabel = isBookmarked ? "取消书签" : "添加书签";
   const transitionClass = reader.transitionDirection ? `page-turn-${settings.pageTurn}-${reader.transitionDirection}` : "";
-  return `<section class="reader theme-${settings.theme} ${reader.menuOpen ? "menu-open" : ""}" style="--reader-font-size:${settings.fontSize}px;--reader-font-family:${fontFamily};--reader-font-weight:${fontWeight};--reader-line-height:${lineHeight}">
+  return `<section data-book-id="${escapeHTML(book.id)}" class="reader theme-${settings.theme} ${reader.menuOpen ? "menu-open" : ""}" style="--reader-font-size:${settings.fontSize}px;--reader-font-family:${fontFamily};--reader-font-weight:${fontWeight};--reader-line-height:${lineHeight}">
     <header class="reader-header"><button class="icon-button" data-reader-action="back" aria-label="返回书架">‹</button><span class="reader-chapter-label">${escapeHTML(chapter.title)}</span>${readerStatusMarkup()}</header>
     <div class="reader-top-menu ${reader.menuOpen ? "open" : ""}"><button class="reader-bookmark-action ${isBookmarked ? "active" : ""}" data-reader-action="toggle-bookmark"><span aria-hidden="true">${isBookmarked ? "◆" : "◇"}</span><strong>${bookmarkLabel}</strong>${bookmarks.length ? `<em>${bookmarks.length}</em>` : ""}</button></div>
     <div class="reader-menu ${reader.menuOpen ? "open" : ""}" id="reader-menu">
@@ -777,16 +677,8 @@ function initializeBatteryStatus() {
   }).catch(() => {});
 }
 
-function chapterSheet(book) {
-  const showingBookmarks = reader.sheetTab === "bookmarks";
-  const query = reader.chapterQuery || "";
-  const bookmarks = getBookBookmarks(book);
-  const descending = reader.chapterOrder === "desc";
-  const chapterEntries = book.chapters.map((chapter, index) => ({ chapter, index }));
-  if (descending) chapterEntries.reverse();
-  const content = showingBookmarks ? bookmarkPanel(book, bookmarks) : `<div class="chapter-search"><span aria-hidden="true">⌕</span><input id="chapter-search" value="${escapeHTML(query)}" placeholder="搜索章节" autocomplete="off" enterkeyhint="search" /></div><div class="chapter-directory-meta"><span id="chapter-result-meta">共 ${book.chapters.length} 章 · 当前第 ${reader.chapter + 1} 章</span><button data-reader-action="toggle-chapter-order" aria-label="切换目录顺序">${descending ? "倒序 ↓" : "正序 ↑"}</button></div><p class="chapter-search-empty" id="chapter-search-empty" hidden>没有匹配的章节</p><div class="chapter-list" id="chapter-list">${chapterEntries.map(({ chapter, index }) => `<button class="${index === reader.chapter ? "active" : ""}" data-chapter="${index}"><span>${escapeHTML(chapter.title)}</span>${index === reader.chapter ? `<em>正在读</em>` : ""}</button>`).join("")}</div>`;
-  return `<aside class="sheet" id="chapter-sheet" ${reader.sheetOpen ? "" : "hidden"}><button class="sheet-backdrop" data-reader-action="close-chapters" aria-label="关闭目录并返回阅读"></button><div class="sheet-content"><div class="sheet-handle"></div><div class="sheet-head"><div><h2>${escapeHTML(book.title)}</h2><p class="subtle">目录与书签 ${safeSourceUrl(book.sourceUrl) ? `<a href="${escapeHTML(safeSourceUrl(book.sourceUrl))}" target="_blank" rel="noopener noreferrer">原文与署名</a>` : ""}</p>${book.sourceNotice ? `<details class="source-credits"><summary>作者、来源与许可</summary><p>${escapeHTML(book.sourceNotice)}</p>${safeSourceUrl(book.sourceLicenseUrl) ? `<a href="${escapeHTML(safeSourceUrl(book.sourceLicenseUrl))}" target="_blank" rel="noopener noreferrer">查看许可</a>` : ""}</details>` : ""}</div><button class="close" data-reader-action="close-chapters" aria-label="关闭目录">×</button></div><div class="chapter-tabs"><button class="${showingBookmarks ? "" : "active"}" data-reader-action="show-chapters">目录</button><button class="${showingBookmarks ? "active" : ""}" data-reader-action="show-bookmarks">书签${bookmarks.length ? ` (${bookmarks.length})` : ""}</button></div>${content}</div></aside>`;
-}
+function chapterSheet(book) { return QrxUpgrades.sheet(book); }
+
 
 function getBookBookmarks(book) {
   return Array.isArray(book.bookmarks) ? [...book.bookmarks].sort((left, right) => (right.createdAt || 0) - (left.createdAt || 0)) : [];
@@ -801,31 +693,31 @@ function bookmarkPanel(book, bookmarks) {
   }).join("")}</div>`;
 }
 
-function paginate(text, fontSize) {
+function paginate(text, fontSize, title = "章节标题") {
   const source = String(text || "");
   if (!source.trim()) return ["暂无正文。"]; 
   const normalizedFontSize = clamp(Number(fontSize) || 19, 16, 40);
-  const signature = [normalizedFontSize, settings.fontFamily, settings.fontWeight, settings.lineHeight, window.innerWidth, readerViewportHeight].join("|");
+  const signature = [normalizedFontSize, settings.fontFamily, settings.fontWeight, settings.lineHeight, window.innerWidth, readerViewportHeight, title].join("|");
   const cachedIndex = paginationCache.findIndex((entry) => entry.text === source && entry.signature === signature);
   if (cachedIndex >= 0) {
     const [cached] = paginationCache.splice(cachedIndex, 1);
     paginationCache.unshift(cached);
     return cached.pages;
   }
-  const pages = paginateByVisibleHeight(source, normalizedFontSize);
+  const pages = paginateByVisibleHeight(source, normalizedFontSize, title);
   paginationCache.unshift({ text: source, signature, pages });
   if (paginationCache.length > 24) paginationCache.pop();
   return pages;
 }
 
-function paginateByVisibleHeight(source, fontSize) {
+function paginateByVisibleHeight(source, fontSize, title) {
   const fontFamily = settings.fontFamily === "song" ? "Songti SC, STSong, serif" : "-apple-system, BlinkMacSystemFont, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif";
   const fontWeight = settings.fontWeight === "regular" ? 520 : 650;
   const lineHeight = ({ compact: 1.72, comfortable: 1.9, relaxed: 2.08 })[settings.lineHeight] || 1.9;
   const probe = document.createElement("section");
   probe.className = "reader pagination-probe";
   probe.style.cssText = `--reader-font-size:${fontSize}px;--reader-font-family:${fontFamily};--reader-font-weight:${fontWeight};--reader-line-height:${lineHeight}`;
-  probe.innerHTML = `<header class="reader-header"></header><article class="reader-page"><h1>章节标题</h1><div class="reader-text"></div></article><footer class="reader-bottom"><div class="reader-progress"><span></span></div><div class="reader-footer"><span>1 / 1</span><span>0%</span></div></footer>`;
+  probe.innerHTML = `<header class="reader-header"></header><article class="reader-page"><h1>${escapeHTML(title || "章节标题")}</h1><div class="reader-text"></div></article><footer class="reader-bottom"><div class="reader-progress"><span></span></div><div class="reader-footer"><span>1 / 1</span><span>0%</span></div></footer>`;
   document.body.appendChild(probe);
   const pageBox = probe.querySelector(".reader-page");
   const heading = probe.querySelector("h1");
@@ -944,7 +836,7 @@ function resolveReadingPage(book, position) {
   const requestedChapter = Number(position?.chapter);
   const chapterIndex = clamp(Number.isFinite(requestedChapter) ? requestedChapter : fallback.chapter, 0, Math.max(0, book.chapters.length - 1));
   const chapter = book.chapters[chapterIndex];
-  const pages = paginate(chapter.text, settings.fontSize);
+  const pages = paginate(chapter.text, settings.fontSize, chapter.title);
   if (Number.isFinite(position?.charOffset)) return { chapter: chapterIndex, page: pageForCharacterOffset(chapter.text, pages, position.charOffset) };
   if (Number.isFinite(position?.page)) {
     const previousPageCount = Math.max(1, Number(position.pageCount) || pages.length);
@@ -963,7 +855,7 @@ function currentReaderOffset(book, pages) {
 function setReaderAnchorFromPage(book) {
   const chapter = book?.chapters?.[reader.chapter];
   if (!chapter) { reader.anchorOffset = 0; return; }
-  const pages = paginate(chapter.text, settings.fontSize);
+  const pages = paginate(chapter.text, settings.fontSize, chapter.title);
   reader.page = clamp(reader.page, 0, Math.max(0, pages.length - 1));
   reader.anchorOffset = pageStartOffset(chapter.text, pages, reader.page);
 }
@@ -986,6 +878,7 @@ function calculateReadingProgress(book, chapterIndex, page, pages) {
 }
 
 function bindEvents() {
+  QrxUpgrades.bind();
   document.querySelector('#source-connect-form')?.addEventListener('submit', event => { event.preventDefault(); void connectPrivateSource(); });
   document.querySelector('[data-forget-source]')?.addEventListener('click', forgetPrivateSource);
   document.querySelectorAll("[data-nav]").forEach((el) => el.addEventListener("click", () => { cancelRemoteChapterRead(); view = el.dataset.nav; render(); }));
@@ -1023,7 +916,7 @@ function bindEvents() {
   const form = document.querySelector("#search-form");
   if (form) form.addEventListener("submit", (event) => { event.preventDefault(); runOnlineSearch(document.querySelector("#book-query").value); });
   document.querySelectorAll("[data-reader-action]").forEach((el) => el.addEventListener("click", () => readerAction(el.dataset.readerAction)));
-  document.querySelectorAll("[data-chapter]").forEach((el) => el.addEventListener("click", () => goToChapter(Number(el.dataset.chapter))));
+
   document.querySelectorAll("[data-bookmark]").forEach((el) => el.addEventListener("click", () => goToBookmark(el.dataset.bookmark)));
   document.querySelectorAll("[data-remove-bookmark]").forEach((el) => el.addEventListener("click", () => removeBookmark(el.dataset.removeBookmark)));
   const chapterSearch = document.querySelector("#chapter-search");
@@ -1036,7 +929,7 @@ function bindEvents() {
     chapterSearch.addEventListener("search", applyChapterSearch);
     chapterSearch.addEventListener("compositionend", applyChapterSearch);
     filterChapterList(reader.chapterQuery || "");
-    if (!(reader.chapterQuery || "").trim()) requestAnimationFrame(() => document.querySelector(".chapter-list button.active:not([hidden])")?.scrollIntoView({ block: "center" }));
+
   }
   const chapterBackdrop = document.querySelector("#chapter-sheet .sheet-backdrop");
   if (chapterBackdrop) chapterBackdrop.addEventListener("touchmove", (event) => event.preventDefault(), { passive: false });
@@ -1236,7 +1129,7 @@ async function removeBookFromShelf(bookId) {
   shelfAction = { ...shelfAction, phase: "removing", error: "" };
   render();
   library = library.filter((item) => item.id !== bookId);
-  if (!(await persist())) {
+  if (!(await persist({ deletedIds: [bookId] }))) {
     library = previousLibrary;
     shelfAction = { ...shelfAction, phase: "confirm", error: "暂时无法保存这次变更，请稍后重试。" };
     render();
@@ -1262,7 +1155,7 @@ function remapCleanedBookLocations(book, previousChapters) {
     const previousPages = paginate(previousChapters[chapterIndex]?.text || "", settings.fontSize);
     const originalOffset = Number.isFinite(position.charOffset) ? position.charOffset : pageStartOffset(previousChapters[chapterIndex]?.text || "", previousPages, position.page);
     const charOffset = remapOffset(chapterIndex, originalOffset);
-    const nextPages = paginate(book.chapters[chapterIndex].text, settings.fontSize);
+    const nextPages = paginate(book.chapters[chapterIndex].text, settings.fontSize, book.chapters[chapterIndex].title);
     return { ...position, chapter: chapterIndex, charOffset, page: pageForCharacterOffset(book.chapters[chapterIndex].text, nextPages, charOffset), pageCount: nextPages.length, updatedAt: Date.now() };
   };
 
@@ -1347,7 +1240,7 @@ async function openBook(id) {
   const location = resolveReadingPage(book, book.readingPosition);
   if (!(await ensureReadableChapter(book, location.chapter))) return;
   const chapter = book.chapters[location.chapter];
-  const pages = paginate(chapter.text, settings.fontSize);
+  const pages = paginate(chapter.text, settings.fontSize, chapter.title);
   const savedOffset = book.readingPosition?.charOffset;
   const anchorOffset = Number.isFinite(savedOffset) ? clamp(savedOffset, 0, chapter.text.length) : pageStartOffset(chapter.text, pages, location.page);
   reader = { bookId: id, chapter: location.chapter, page: location.page, anchorOffset, menuOpen: false, sheetOpen: false, sheetTab: "chapters", chapterOrder: "asc", chapterQuery: "", settingsOpen: false, transitionDirection: "" };
@@ -1381,37 +1274,40 @@ function readerAction(action) {
 async function nextPage() {
   cancelRemoteChapterRead();
   const book = currentBook();
-  const pages = paginate(book.chapters[reader.chapter].text, settings.fontSize);
+  const pages = paginate(book.chapters[reader.chapter].text, settings.fontSize, book.chapters[reader.chapter].title);
   if (reader.page < pages.length - 1) reader.page += 1;
   else if (reader.chapter < book.chapters.length - 1) { if (!(await ensureReadableChapter(book, reader.chapter + 1))) return; reader.chapter += 1; reader.page = 0; }
   else { showToast("已经读到本书结尾"); return; }
   reader.transitionDirection = "next";
   setReaderAnchorFromPage(book);
-  reader.menuOpen = false; reader.settingsOpen = false; updateProgress(); render();
+  reader.menuOpen = false; reader.settingsOpen = false; updateProgress(); QrxUpgrades.renderPage();
 }
+
 
 async function previousPage() {
   cancelRemoteChapterRead();
   const book = currentBook();
   if (reader.page > 0) reader.page -= 1;
-  else if (reader.chapter > 0) { if (!(await ensureReadableChapter(book, reader.chapter - 1))) return; reader.chapter -= 1; reader.page = paginate(book.chapters[reader.chapter].text, settings.fontSize).length - 1; }
-  else { reader.menuOpen = false; render(); return; }
+  else if (reader.chapter > 0) { if (!(await ensureReadableChapter(book, reader.chapter - 1))) return; reader.chapter -= 1; reader.page = paginate(book.chapters[reader.chapter].text, settings.fontSize, book.chapters[reader.chapter].title).length - 1; }
+  else { reader.menuOpen = false; QrxUpgrades.renderPage(); return; }
   reader.transitionDirection = "previous";
   setReaderAnchorFromPage(book);
-  reader.menuOpen = false; reader.settingsOpen = false; updateProgress(); render();
+  reader.menuOpen = false; reader.settingsOpen = false; updateProgress(); QrxUpgrades.renderPage();
 }
+
 
 async function previousChapter() {
   if (reader.chapter === 0) { showToast("已经是第一章"); return; }
   const book = currentBook();
   if (!(await ensureReadableChapter(book, reader.chapter - 1))) return;
   reader.chapter -= 1;
-  reader.page = paginate(book.chapters[reader.chapter].text, settings.fontSize).length - 1;
+  reader.page = paginate(book.chapters[reader.chapter].text, settings.fontSize, book.chapters[reader.chapter].title).length - 1;
   reader.transitionDirection = "previous";
   setReaderAnchorFromPage(book);
   updateProgress();
-  render();
+  QrxUpgrades.renderPage();
 }
+
 
 async function nextChapter() {
   const book = currentBook();
@@ -1422,8 +1318,9 @@ async function nextChapter() {
   reader.transitionDirection = "next";
   setReaderAnchorFromPage(book);
   updateProgress();
-  render();
+  QrxUpgrades.renderPage();
 }
+
 
 async function goToChapter(chapterIndex) {
   const book = currentBook();
@@ -1436,53 +1333,15 @@ async function goToChapter(chapterIndex) {
   reader.menuOpen = false;
   reader.settingsOpen = false;
   updateProgress(true);
-  render();
+  QrxUpgrades.renderPage();
 }
 
-function filterChapterList(query) {
-  const normalized = String(query || "").trim().toLowerCase();
-  const buttons = [...document.querySelectorAll("#chapter-list [data-chapter]")];
-  let visible = 0;
-  buttons.forEach((button) => {
-    const match = !normalized || button.textContent.toLowerCase().includes(normalized);
-    button.hidden = !match;
-    if (match) visible += 1;
-  });
-  const empty = document.querySelector("#chapter-search-empty");
-  if (empty) empty.hidden = visible > 0;
-  const meta = document.querySelector("#chapter-result-meta");
-  if (meta) meta.textContent = normalized ? `找到 ${visible} 章` : `共 ${buttons.length} 章 · 当前第 ${reader.chapter + 1} 章`;
-}
 
-function toggleBookmark() {
-  const book = currentBook();
-  if (!book) return;
-  const pages = paginate(book.chapters[reader.chapter].text, settings.fontSize);
-  const bookmarks = Array.isArray(book.bookmarks) ? book.bookmarks : [];
-  const charOffset = currentReaderOffset(book, pages);
-  const existingIndex = bookmarks.findIndex((bookmark) => bookmarkMatchesCurrentPosition(book, bookmark, charOffset));
-  if (existingIndex >= 0) {
-    book.bookmarks = bookmarks.filter((_, index) => index !== existingIndex);
-    void persist();
-    render();
-    showToast("已取消书签");
-    return;
-  }
-  const excerpt = (pages[reader.page] || "").replace(/\s+/g, " ").trim().slice(0, 44);
-  book.bookmarks = [...bookmarks, {
-    id: newBookmarkId(),
-    chapter: reader.chapter,
-    chapterTitle: book.chapters[reader.chapter].title,
-    page: reader.page,
-    pageCount: pages.length,
-    charOffset,
-    excerpt,
-    createdAt: Date.now()
-  }];
-  void persist();
-  render();
-  showToast("已加入书签");
-}
+function filterChapterList(query) { return QrxUpgrades.filterChapters(query); }
+
+
+async function toggleBookmark() { return QrxUpgrades.toggleBookmark(); }
+
 
 async function goToBookmark(bookmarkId) {
   const book = currentBook();
@@ -1493,23 +1352,18 @@ async function goToBookmark(bookmarkId) {
   reader.chapter = location.chapter;
   reader.page = location.page;
   const chapter = book.chapters[reader.chapter];
-  const pages = paginate(chapter.text, settings.fontSize);
+  const pages = paginate(chapter.text, settings.fontSize, chapter.title);
   reader.anchorOffset = Number.isFinite(bookmark.charOffset) ? clamp(bookmark.charOffset, 0, chapter.text.length) : pageStartOffset(chapter.text, pages, reader.page);
   reader.sheetOpen = false;
   reader.menuOpen = false;
   reader.settingsOpen = false;
   updateProgress(true);
-  render();
+  QrxUpgrades.renderPage();
 }
 
-function removeBookmark(bookmarkId) {
-  const book = currentBook();
-  if (!book?.bookmarks) return;
-  book.bookmarks = book.bookmarks.filter((bookmark) => bookmark.id !== bookmarkId);
-  void persist();
-  render();
-  showToast("已删除书签");
-}
+
+async function removeBookmark(bookmarkId) { return QrxUpgrades.removeBookmark(bookmarkId); }
+
 
 function newBookmarkId() {
   if (globalThis.crypto?.randomUUID) return `bookmark-${globalThis.crypto.randomUUID()}`;
@@ -1519,11 +1373,11 @@ function newBookmarkId() {
 function applyReaderLayout(nextSettings) {
   const book = currentBook();
   const chapter = book?.chapters?.[reader.chapter];
-  const pagesBefore = chapter ? paginate(chapter.text, settings.fontSize) : null;
+  const pagesBefore = chapter ? paginate(chapter.text, settings.fontSize, chapter.title) : null;
   const charOffset = chapter && pagesBefore ? currentReaderOffset(book, pagesBefore) : 0;
   Object.assign(settings, nextSettings);
   if (chapter) {
-    const pagesAfter = paginate(chapter.text, settings.fontSize);
+    const pagesAfter = paginate(chapter.text, settings.fontSize, chapter.title);
     reader.page = pageForCharacterOffset(chapter.text, pagesAfter, charOffset);
     reader.anchorOffset = charOffset;
     updateProgress();
@@ -1543,7 +1397,7 @@ function updateProgress(immediate = false) {
   const book = currentBook();
   if (!book) return;
   const chapter = book.chapters[reader.chapter];
-  const pages = paginate(chapter.text, settings.fontSize);
+  const pages = paginate(chapter.text, settings.fontSize, chapter.title);
   reader.page = clamp(reader.page, 0, Math.max(0, pages.length - 1));
   const charOffset = currentReaderOffset(book, pages);
   reader.anchorOffset = charOffset;
@@ -1552,8 +1406,8 @@ function updateProgress(immediate = false) {
   book.progress = calculateReadingProgress(book, reader.chapter, reader.page, pages);
   clearTimeout(progressPersistTimer);
   const isStableStoppingPoint = reader.page === 0 || reader.page === pages.length - 1 || (reader.page + 1) % 3 === 0;
-  if (immediate || isStableStoppingPoint) { void persist(); return; }
-  progressPersistTimer = setTimeout(() => { void persist(); }, 650);
+  if (immediate || isStableStoppingPoint) { QrxUpgrades.saveProgress(); return; }
+  progressPersistTimer = setTimeout(() => QrxUpgrades.saveProgress(), 650);
 }
 
 function bindSwipe(element) {
@@ -1842,7 +1696,7 @@ function mergeBackupBookmarks(existing, incoming) {
 }
 
 function uniqueRestoredBookId(preferred, books) {
-  if (!books.some((book) => book.id === preferred)) return preferred;
+  if (!books.some((book) => book.id === preferred) && !QrxLibrary.wasDeleted(preferred)) return preferred;
   let id = newLocalBookId();
   while (books.some((book) => book.id === id)) id = newLocalBookId();
   return id;
@@ -1872,6 +1726,7 @@ function mergeBackupLibrary(incomingBooks) {
     const shouldRestoreMetadata = (Number(incoming.metadataUpdatedAt) || 0) > (Number(existing.metadataUpdatedAt) || 0);
     books[matchIndex] = {
       ...existing,
+      chapters: QrxUpgrades.mergeCached(existing, incoming),
       ...(shouldRestorePosition ? { readingPosition: incoming.readingPosition, progress: incoming.progress, lastReadAt: incomingUpdatedAt } : {}),
       ...(shouldRestoreMetadata ? { title: incoming.title, author: incoming.author, coverId: incoming.coverId, coverStyle: incoming.coverStyle, metadataUpdatedAt: incoming.metadataUpdatedAt } : {}),
       bookmarks: mergeBackupBookmarks(existing.bookmarks, incoming.bookmarks)
@@ -1977,6 +1832,8 @@ function handleBackupAction(action) {
 }
 
 function openImportFlow() {
+  if (!libraryReady) { showToast("书架尚未成功读取，请先重试"); return; }
+
   importSession = { ...emptyImportSession(), visible: true, phase: "choose" };
   render();
 }
